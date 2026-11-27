@@ -27,6 +27,7 @@ from streambridge_core.broker import PlaybackBroker, PlaybackSessionResult
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
+from streambridge_core.models import MediaType
 from streambridge_core.projection import ProjectionEngine
 from streambridge_core.reconciler import ReconciliationEngine, ReconciliationResult
 from streambridge_core.security import (
@@ -156,10 +157,16 @@ class StreamBridgePluginApp:
             )
         return self.adapter
 
-    def list_provider_titles(self, provider_id: str = "netflix") -> list[dict[str, Any]]:
+    def list_provider_titles(
+        self, provider_id: str = "netflix", media_filter: str | None = None
+    ) -> list[dict[str, Any]]:
         titles = self.store.list_titles(provider=provider_id, available_only=True)
         entries: list[dict[str, Any]] = []
         for title in titles:
+            if media_filter == "movies" and title.media_type != MediaType.MOVIE:
+                continue
+            if media_filter == "tvshows" and title.media_type not in (MediaType.SHOW, MediaType.EPISODE):
+                continue
             offers = self.store.get_offers_for_title(title.title_id, provider=provider_id)
             offer = offers[0] if offers else None
             pb_state = self.store.get_playback_state(title.title_id)
@@ -318,9 +325,10 @@ def set_app(app: StreamBridgePluginApp | None) -> None:
 @plugin.route("/")
 def index() -> list[dict[str, str]]:
     items = [
-        {"label": "Netflix Library", "url": "plugin://plugin.video.streambridge/providers/netflix"},
+        {"label": "Netflix — Movies", "url": "plugin://plugin.video.streambridge/providers/netflix/movies"},
+        {"label": "Netflix — TV Shows", "url": "plugin://plugin.video.streambridge/providers/netflix/tvshows"},
         {"label": "Sync Netflix Catalog Now", "url": "plugin://plugin.video.streambridge/sync/netflix"},
-        {"label": "Sign In to Netflix (Isolated Browser Session)", "url": "plugin://plugin.video.streambridge/auth/login/netflix"},
+        {"label": "Sign In to Netflix", "url": "plugin://plugin.video.streambridge/auth/login/netflix"},
         {"label": "Clear Isolated Browser Session", "url": "plugin://plugin.video.streambridge/auth/clear"},
     ]
     if IN_KODI:
@@ -338,6 +346,22 @@ def index() -> list[dict[str, str]]:
 def browse_provider(provider_id: str) -> list[dict[str, Any]]:
     app = get_app()
     entries = app.list_provider_titles(provider_id=provider_id)
+    if IN_KODI:
+        import xbmcplugin  # type: ignore[import-not-found]
+
+        for entry in entries:
+            li = entry.get("listitem")
+            if li is not None:
+                li.setProperty("IsPlayable", "true")
+                xbmcplugin.addDirectoryItem(plugin.handle, entry["play_url"], li, isFolder=False)
+        xbmcplugin.endOfDirectory(plugin.handle)
+    return entries
+
+
+@plugin.route("/providers/<provider_id>/<media_filter>")
+def browse_provider_filtered(provider_id: str, media_filter: str) -> list[dict[str, Any]]:
+    app = get_app()
+    entries = app.list_provider_titles(provider_id=provider_id, media_filter=media_filter)
     if IN_KODI:
         import xbmcplugin  # type: ignore[import-not-found]
 

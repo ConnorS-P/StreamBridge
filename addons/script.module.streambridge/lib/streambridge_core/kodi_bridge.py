@@ -223,20 +223,93 @@ class KodiBridge:
         return target
 
     def get_export_root(self, fallback_dir: Path | None = None) -> Path:
-        """Resolve and pre-create the configured `export_root` directory so Kodi's file browser never hangs."""
+        """Resolve and pre-create the configured `export_root` and provider Movies/TV folders."""
+        target: Path | None = None
         if IN_KODI and xbmcvfs is not None and xbmcaddon is not None:
             try:
                 addon = xbmcaddon.Addon("plugin.video.streambridge")
                 configured = addon.getSettingString("export_root") or "special://profile/addon_data/plugin.video.streambridge/library"
                 translated = xbmcvfs.translatePath(configured)
-                p = Path(translated)
-                p.mkdir(parents=True, exist_ok=True)
-                return p
+                target = Path(translated)
             except Exception as exc:
                 self.log(f"Failed to resolve export_root setting: {exc}", level="warning")
-        target = fallback_dir or (self.get_profile_dir() / "library")
-        target.mkdir(parents=True, exist_ok=True)
+
+        if target is None:
+            target = fallback_dir or (self.get_profile_dir() / "library")
+
+        # Always pre-create the Movies and TV directories so they exist before the user browses for sources
+        (target / "Streaming" / "Netflix" / "Movies").mkdir(parents=True, exist_ok=True)
+        (target / "Streaming" / "Netflix" / "TV").mkdir(parents=True, exist_ok=True)
+        self.ensure_browseable_source_entry(target / "Streaming", sources_xml_path=None)
         return target
+
+    def ensure_browseable_source_entry(
+        self,
+        streaming_dir: Path,
+        sources_xml_path: Path | None = None,
+        source_name: str = "StreamBridge Library",
+    ) -> bool:
+        """Register `StreamBridge Library` under `<files>` in Kodi's `sources.xml`.
+
+        In Kodi, entries under `<files>` appear directly at the top level of the
+        `Videos -> Add videos... -> Browse` dialog, allowing users to follow the
+        standard Kodi 'Add videos -> Browse -> StreamBridge Library -> Netflix -> Movies / TV'
+        workflow without hunting through hidden `%APPDATA%` folders.
+        """
+        import xml.etree.ElementTree as ET
+
+        xml_path = sources_xml_path
+        if xml_path is None:
+            if IN_KODI and xbmcvfs is not None:
+                xml_path = Path(xbmcvfs.translatePath("special://profile/sources.xml"))
+            else:
+                return False
+
+        if not xml_path.exists():
+            root = ET.Element("sources")
+            for section in ("programs", "video", "music", "pictures", "files", "games"):
+                sec_el = ET.SubElement(root, section)
+                ET.SubElement(sec_el, "default", attrib={"pathversion": "1"})
+        else:
+            try:
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+            except Exception as exc:
+                self.log(f"Could not parse sources.xml: {exc}", level="warning")
+                return False
+
+        files_el = root.find("files")
+        if files_el is None:
+            files_el = ET.SubElement(root, "files")
+            ET.SubElement(files_el, "default", attrib={"pathversion": "1"})
+
+        target_path_str = str(streaming_dir.resolve())
+        if not target_path_str.endswith(("\\", "/")):
+            target_path_str += "\\" if "\\" in target_path_str else "/"
+
+        for src in files_el.findall("source"):
+            name_el = src.find("name")
+            path_el = src.find("path")
+            if name_el is not None and name_el.text == source_name:
+                if path_el is not None and path_el.text == target_path_str:
+                    return True
+                if path_el is not None:
+                    path_el.text = target_path_str
+                    break
+        else:
+            new_src = ET.SubElement(files_el, "source")
+            name_el = ET.SubElement(new_src, "name")
+            name_el.text = source_name
+            path_el = ET.SubElement(new_src, "path", attrib={"pathversion": "1"})
+            path_el.text = target_path_str
+            allow_el = ET.SubElement(new_src, "allowsharing")
+            allow_el.text = "true"
+
+        if hasattr(ET, "indent"):
+            ET.indent(root, space="    ")
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
+        return True
 
     def load_filter_policy(self) -> LibraryFilterPolicy:
         """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""

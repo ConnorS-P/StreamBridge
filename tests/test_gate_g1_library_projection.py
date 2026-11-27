@@ -187,6 +187,25 @@ def test_g1_plugin_routing_and_ecosystem_metadata(tmp_path: Path) -> None:
 
         res2 = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/play", "1", "?id=sb_nf_ep_st_s01e01"])
         assert res2.title_id == "sb_nf_ep_st_s01e01"
+
+        # Verify separate Movies and TV Shows routes
+        movie_only = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/providers/netflix/movies", "1", ""])
+        tv_only = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/providers/netflix/tvshows", "1", ""])
+        assert len(movie_only) == 3
+        assert len(tv_only) == 3
+
+        # Verify automatic registration of 'StreamBridge Library' in Kodi's sources.xml <files> section
+        sources_xml = tmp_path / "sources.xml"
+        sources_xml.write_text(
+            "<sources><video><source><name>Movies</name><path pathversion=\"1\">M:\\Movies\\</path></source></video><files><default pathversion=\"1\"></default></files></sources>",
+            encoding="utf-8",
+        )
+        assert app.kodi.ensure_browseable_source_entry(export_root / "Streaming", sources_xml_path=sources_xml)
+        parsed_sources = ET.parse(sources_xml).getroot()
+        video_names = [el.findtext("name") for el in parsed_sources.findall("./video/source")]
+        file_names = [el.findtext("name") for el in parsed_sources.findall("./files/source")]
+        assert "Movies" in video_names
+        assert "StreamBridge Library" in file_names
     finally:
         plugin_entry.set_app(None)
         store.close()
