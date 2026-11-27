@@ -1,0 +1,36 @@
+# Local reference workspace (reference repos, license notes, churn research)
+.reference/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Build and distribution artifacts
+build/
+dist/
+player/build/
+player/out/
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+
+# OS / IDE artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Runtime / test state
+*.db
+*.db-shm
+*.db-wal

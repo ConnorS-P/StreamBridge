@@ -1,0 +1,59 @@
+name: Publish Kodi Repository
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-kodi-repo:
+    name: Build & Publish StreamBridge Kodi Repository
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies & run tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pytest
+
+      - name: Build StreamBridge.Player.exe (Release x64)
+        run: |
+          cmake -S player -B player/build -A x64
+          cmake --build player/build --config Release
+          .\player\build\Release\StreamBridge.Player.exe --self-test
+
+      - name: Bundle StreamBridge.Player.exe into plugin.video.streambridge
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "addons/plugin.video.streambridge/bin" | Out-Null
+          Copy-Item -Force "player/build/Release/StreamBridge.Player.exe" "addons/plugin.video.streambridge/bin/StreamBridge.Player.exe"
+
+      - name: Build Kodi Repository (addons.xml, addons.xml.md5, .zip, .sha256)
+        run: python scripts/build_kodi_repo.py
+
+      - name: Publish static Kodi repository to repo branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+           WORK_TMP=$(mktemp -d)
+          cp -r dist/* "$WORK_TMP/"
+          git checkout --orphan repo-temp
+          git rm -rf .
+          cp -r "$WORK_TMP/"* .
+          git add -A
+          git commit -m "Publish Kodi repository artifacts (${GITHUB_SHA::7})"
+          git push origin HEAD:refs/heads/repo --force

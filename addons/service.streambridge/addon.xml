@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="service.streambridge" name="StreamBridge Background Service" version="0.1.0" provider-name="ConnorS-P">
+    <requires>
+        <import addon="xbmc.python" version="3.0.1"/>
+        <import addon="script.module.streambridge" version="0.1.0"/>
+        <import addon="plugin.video.streambridge" version="0.1.0"/>
+    </requires>
+    <extension point="xbmc.service" library="service.py" start="login"/>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">Catalog sync, library scan/clean monitor, and state bridge for StreamBridge</summary>
+        <description lang="en_GB">Monitors Kodi library scan and clean lifecycle events, runs non-blocking provider catalog reconciliation, and synchronizes playback state without refresh loops.</description>
+        <platform>all</platform>
+        <license>MIT</license>
+        <source>https://github.com/ConnorS-P/StreamBridge</source>
+    </extension>
+</addon>
