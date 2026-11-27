@@ -142,15 +142,15 @@ class StreamBridgePluginApp:
 
             addon_inst = xbmcaddon.Addon("plugin.video.streambridge")
             cat_mode = addon_inst.getSettingString("netflix_catalog_mode") or "live_justwatch"
-            wm_key = addon_inst.getSettingString("watchmode_api_key") or None
             if cat_mode == "fixture":
-                self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
-            else:
-                self.adapter = NetflixCatalogAdapter(
-                    store=self.store,
-                    watchmode_api_key=wm_key,
-                    companion_exe_path=self.companion_exe_path,
-                )
+                cat_mode = "live_justwatch"
+                addon_inst.setSettingString("netflix_catalog_mode", "live_justwatch")
+            wm_key = addon_inst.getSettingString("watchmode_api_key") or None
+            self.adapter = NetflixCatalogAdapter(
+                store=self.store,
+                watchmode_api_key=wm_key,
+                companion_exe_path=self.companion_exe_path,
+            )
         else:
             self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
         self.broker = broker or PlaybackBroker(

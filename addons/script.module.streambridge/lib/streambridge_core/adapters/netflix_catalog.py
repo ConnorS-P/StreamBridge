@@ -107,9 +107,50 @@ _COUNTRY_TO_LANG: dict[str, str] = {
 
 _NETFLIX_ID_RE = re.compile(r"/(?:title|watch)/(\d+)")
 
-_JUSTWATCH_NETFLIX_QUERY = """
-query GetPopularNetflixTitles($country: Country!, $first: Int!) {
-  popularTitles(country: $country, first: $first, filter: {packages: ["nfx"]}) {
+_JUSTWATCH_NETFLIX_MOVIES_QUERY = """
+query GetPopularNetflixMovies($country: Country!, $first: Int!, $after: String) {
+  popularTitles(country: $country, first: $first, after: $after, filter: {packages: ["nfx"], objectTypes: [MOVIE]}) {
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+    edges {
+      node {
+        objectId
+        objectType
+        content(country: $country, language: "en") {
+          title
+          originalReleaseYear
+          ageCertification
+          shortDescription
+          productionCountries
+          externalIds {
+            imdbId
+            tmdbId
+          }
+          scoring {
+            imdbScore
+          }
+          genres {
+            shortName
+          }
+        }
+        watchNowOffer(country: $country, platform: WEB) {
+          standardWebURL
+        }
+      }
+    }
+  }
+}
+"""
+
+_JUSTWATCH_NETFLIX_SHOWS_QUERY = """
+query GetPopularNetflixShows($country: Country!, $first: Int!, $after: String) {
+  popularTitles(country: $country, first: $first, after: $after, filter: {packages: ["nfx"], objectTypes: [SHOW]}) {
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
     edges {
       node {
         objectId
@@ -156,6 +197,9 @@ query GetPopularNetflixTitles($country: Country!, $first: Int!) {
 }
 """
 
+# Backward-compatible alias for unit tests
+_JUSTWATCH_NETFLIX_QUERY = _JUSTWATCH_NETFLIX_SHOWS_QUERY
+
 
 def _extract_netflix_id(url: str, fallback: str) -> str:
     m = _NETFLIX_ID_RE.search(url or "")
@@ -190,7 +234,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
         timeout_seconds: float = 15.0,
         companion_exe_path: Path | None = None,
         my_list_content_ids: set[str] | None = None,
-        catalog_limit: int = 60,
+        catalog_limit: int = 100,
     ) -> None:
         self.store = store
         self.watchmode_api_key = (watchmode_api_key or "").strip() or None
@@ -260,38 +304,88 @@ class NetflixCatalogAdapter(ProviderAdapter):
 
         return self._refresh_from_justwatch_graphql(region=region, first=self.catalog_limit)
 
-    def _refresh_from_justwatch_graphql(self, region: str = "US", first: int = 60) -> CatalogBatch:
-        """Fetch live regional Netflix Movies & TV Shows from JustWatch public GraphQL (zero API key)."""
-        my_list_entries = self.fetch_my_list_via_companion()
-        try:
-            resp = self.session.post(
-                JUSTWATCH_GRAPHQL_URL,
-                json={
-                    "query": _JUSTWATCH_NETFLIX_QUERY,
-                    "variables": {
-                        "country": region.upper(),
-                        "first": first,
-                    },
-                },
-                timeout=self.timeout_seconds,
-            )
-            resp.raise_for_status()
-            payload: dict[str, Any] = resp.json()
-        except Exception as exc:
-            sanitized_err = redact_secrets(str(exc))
-            self._last_error = f"JustWatch GraphQL request failed: {sanitized_err}"
-            logger.warning("JustWatch catalog fetch failed: %s", sanitized_err)
-            return CatalogBatch(
-                provider=self.provider_id,
-                region=region,
-                revision=f"jw_exc_{int(time.time())}",
-                completeness=SnapshotCompleteness.FAILED,
-                status="network_error",
-                items=[],
-                error_summary=self._last_error,
-            )
+    def _refresh_from_justwatch_graphql(self, region: str = "US", first: int = 100) -> CatalogBatch:
+        """Fetch live regional Netflix Movies & TV Shows from JustWatch public GraphQL (zero API key).
 
-        edges = (((payload.get("data") or {}).get("popularTitles") or {}).get("edges")) or []
+        Splits Movie and Show GraphQL queries so nested `seasons { episodes }` on Show nodes never
+        exceeds JustWatch's 350,000 complexity cap while fetching hundreds of Movies per batch.
+        """
+        my_list_entries = self.fetch_my_list_via_companion()
+        edges: list[dict[str, Any]] = []
+        country_code = region.upper()
+
+        # 1. Fetch Movie pages (low GraphQL complexity -> 100 movies per request, up to 3 pages = 300 movies)
+        movie_cursor: str | None = None
+        movie_page_size = min(max(first, 20), 100)
+        for _ in range(3):
+            try:
+                resp = self.session.post(
+                    JUSTWATCH_GRAPHQL_URL,
+                    json={
+                        "query": _JUSTWATCH_NETFLIX_MOVIES_QUERY,
+                        "variables": {
+                            "country": country_code,
+                            "first": movie_page_size,
+                            "after": movie_cursor,
+                        },
+                    },
+                    timeout=self.timeout_seconds,
+                )
+                resp.raise_for_status()
+                payload: dict[str, Any] = resp.json()
+            except Exception as exc:
+                if not edges:
+                    sanitized_err = redact_secrets(str(exc))
+                    self._last_error = f"JustWatch GraphQL request failed: {sanitized_err}"
+                    logger.warning("JustWatch catalog fetch failed: %s", sanitized_err)
+                    return CatalogBatch(
+                        provider=self.provider_id,
+                        region=region,
+                        revision=f"jw_exc_{int(time.time())}",
+                        completeness=SnapshotCompleteness.FAILED,
+                        status="network_error",
+                        items=[],
+                        error_summary=self._last_error,
+                    )
+                break
+
+            pop_titles = (payload.get("data") or {}).get("popularTitles") or {}
+            page_edges = pop_titles.get("edges") or []
+            edges.extend(page_edges)
+            page_info = pop_titles.get("pageInfo") or {}
+            if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+                break
+            movie_cursor = str(page_info["endCursor"])
+
+        # 2. Fetch TV Show pages (`first: 6` per page stays below the 350,000 complexity limit with seasons/episodes)
+        show_cursor: str | None = None
+        for _ in range(4):
+            try:
+                resp = self.session.post(
+                    JUSTWATCH_GRAPHQL_URL,
+                    json={
+                        "query": _JUSTWATCH_NETFLIX_SHOWS_QUERY,
+                        "variables": {
+                            "country": country_code,
+                            "first": 6,
+                            "after": show_cursor,
+                        },
+                    },
+                    timeout=self.timeout_seconds,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception:
+                break
+
+            pop_shows = (payload.get("data") or {}).get("popularTitles") or {}
+            show_edges = pop_shows.get("edges") or []
+            edges.extend(show_edges)
+            page_info = pop_shows.get("pageInfo") or {}
+            if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+                break
+            show_cursor = str(page_info["endCursor"])
+
         items: list[CatalogItem] = []
         seen_content_ids: set[str] = set()
 
@@ -306,7 +400,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
 
             obj_id = str(node.get("objectId") or "")
             nf_content_id = _extract_netflix_id(raw_web_url, fallback=obj_id)
-            if not nf_content_id:
+            if not nf_content_id or nf_content_id in seen_content_ids:
                 continue
 
             try:
