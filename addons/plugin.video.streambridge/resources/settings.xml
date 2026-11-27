@@ -399,6 +399,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="netflix_sign_in" type="action" label="30213" help="30214">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.streambridge/auth/login/netflix)</data>
+                    <control type="button" format="action"/>
+                </setting>
                 <setting id="netflix_catalog_mode" type="string" label="30202" help="30203">
                     <level>0</level>
                     <default>fixture</default>

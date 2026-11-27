@@ -25,7 +25,7 @@ from collections.abc import Callable
 
 from .models import LaunchDescriptor, PlaybackSessionState, SessionEvent
 from .providers import ProviderDescriptor, load_provider_descriptor
-from .security import validate_launch_url
+from .security import get_isolated_browser_profile_dir, validate_launch_url
 
 
 @dataclass
@@ -180,7 +180,14 @@ def launch_browser_process(
     """
     exe_name = Path(binary).name.lower()
     if app_mode and any(b in exe_name for b in ("msedge", "chrome", "chromium")):
-        args = [binary, f"--app={validated_url}", "--start-fullscreen"]
+        profile_dir = get_isolated_browser_profile_dir()
+        args = [
+            binary,
+            f"--app={validated_url}",
+            f"--user-data-dir={profile_dir}",
+            "--start-fullscreen",
+            "--no-first-run",
+        ]
     else:
         args = [binary, validated_url]
 

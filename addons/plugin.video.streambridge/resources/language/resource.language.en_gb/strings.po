@@ -136,6 +136,14 @@ msgctxt "#30201"
 msgid "Include Netflix titles in StreamBridge catalog sync and library export."
 msgstr ""
 
+msgctxt "#30213"
+msgid "Sign In to Netflix (Open Isolated Browser Session)"
+msgstr ""
+
+msgctxt "#30214"
+msgid "Opens Netflix in StreamBridge's isolated DPAPI-encrypted Edge profile. Sign in once and close the window (Alt+F4) to persist your session."
+msgstr ""
+
 msgctxt "#30202"
 msgid "Catalog Source Mode"
 msgstr ""

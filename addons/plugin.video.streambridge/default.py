@@ -29,7 +29,11 @@ from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
 from streambridge_core.projection import ProjectionEngine
 from streambridge_core.reconciler import ReconciliationEngine, ReconciliationResult
-from streambridge_core.security import clear_isolated_browser_profile
+from streambridge_core.security import (
+    clear_isolated_browser_profile,
+    get_isolated_browser_profile_dir,
+    validate_launch_url,
+)
 
 try:
     import routing  # type: ignore[import-not-found]
@@ -197,6 +201,48 @@ class StreamBridgePluginApp:
         )
         return cleared
 
+    def launch_provider_login(self, provider_id: str = "netflix") -> bool:
+        """Open the provider's official login page inside the isolated DPAPI browser profile."""
+        from streambridge_core.platform_compat import detect_platform_environment
+        import subprocess
+
+        login_url = validate_launch_url("https://www.netflix.com/login", provider=provider_id)
+        profile_dir = get_isolated_browser_profile_dir()
+        env = detect_platform_environment(provider_id=provider_id)
+
+        if not env.desktop_browser_cmd:
+            self.kodi.notify(
+                "StreamBridge Login",
+                "No desktop browser (Microsoft Edge / Chromium) found to open login session.",
+                error=True,
+            )
+            return False
+
+        binary = env.desktop_browser_cmd[0]
+        exe_name = Path(binary).name.lower()
+        if any(b in exe_name for b in ("msedge", "chrome", "chromium")):
+            args = [
+                binary,
+                f"--app={login_url}",
+                f"--user-data-dir={profile_dir}",
+                "--no-first-run",
+            ]
+        else:
+            args = [binary, login_url]
+
+        self.kodi.notify(
+            "StreamBridge Login",
+            "Opening Netflix login. Sign in, select your profile, then close the window (Alt+F4).",
+        )
+        subprocess.Popen(
+            args,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+
 
 _ACTIVE_APP: StreamBridgePluginApp | None = None
 
@@ -218,6 +264,7 @@ def index() -> list[dict[str, str]]:
     items = [
         {"label": "Netflix Library", "url": "plugin://plugin.video.streambridge/providers/netflix"},
         {"label": "Sync Netflix Catalog Now", "url": "plugin://plugin.video.streambridge/sync/netflix"},
+        {"label": "Sign In to Netflix (Isolated Browser Session)", "url": "plugin://plugin.video.streambridge/auth/login/netflix"},
         {"label": "Clear Isolated Browser Session", "url": "plugin://plugin.video.streambridge/auth/clear"},
     ]
     if IN_KODI:
@@ -265,6 +312,12 @@ def play_query_route() -> PlaybackSessionResult:
 def sync_route(provider_id: str) -> ReconciliationResult:
     app = get_app()
     return app.sync_provider(provider_id=provider_id)
+
+
+@plugin.route("/auth/login/<provider_id>")
+def login_route(provider_id: str) -> bool:
+    app = get_app()
+    return app.launch_provider_login(provider_id=provider_id)
 
 
 @plugin.route("/auth/clear")
