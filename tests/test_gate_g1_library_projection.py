@@ -253,4 +253,30 @@ def test_g1_library_filters_exclude_dubbed_foreign_ratings_and_genres(tmp_path: 
     assert not evaluate_title_filter(
         reality_show, LibraryFilterPolicy(exclude_reality_and_talk=False, max_content_rating="PG-13")
     ).allowed
+
+    # 4. Verify radio-button Kodi settings mapping (from_kodi_settings)
+    radio_policy = LibraryFilterPolicy.from_kodi_settings(
+        {
+            "filter_by_language": True,
+            "allow_dubbed_content": False,
+            "lang_en": True,
+            "lang_ja": True,
+            "lang_de": False,
+            "filter_by_rating": True,
+            "rating_tv_y": False,
+            "rating_tv_y7": False,
+            "rating_r": False,
+            "genre_reality": False,
+            "genre_standup": False,
+            "min_user_rating": 7.0,
+            "min_release_year": 1990,
+        }
+    )
+    assert "en" in radio_policy.allowed_original_languages
+    assert "ja" in radio_policy.allowed_original_languages
+    assert "de" in radio_policy.blocked_original_languages
+    assert "R" in radio_policy.blocked_content_ratings
+    assert "TV-MA" in radio_policy.blocked_content_ratings
+    assert not evaluate_title_filter(reality_show, radio_policy).allowed
+    assert not evaluate_title_filter(kids_show, radio_policy).allowed
     store.close()

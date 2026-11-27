@@ -19,7 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from .filters import LibraryFilterPolicy
+from .filters import (
+    GENRE_TOGGLE_MAP,
+    LANGUAGE_TOGGLE_MAP,
+    RATING_TOGGLE_MAP,
+    LibraryFilterPolicy,
+)
 from .models import LaunchDescriptor, MediaType, Offer, PlaybackState, Title
 from .security import redact_secrets
 
@@ -211,27 +216,28 @@ class KodiBridge:
         return target
 
     def load_filter_policy(self) -> LibraryFilterPolicy:
-        """Load the user's configured `LibraryFilterPolicy` from Kodi settings when in Kodi."""
+        """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""
         if not (IN_KODI and xbmcaddon is not None):
             return LibraryFilterPolicy.permissive_default()
         try:
             addon = xbmcaddon.Addon("plugin.video.streambridge")
-            settings_dict = {
+            settings_dict: dict[str, Any] = {
                 "include_movies": addon.getSettingBool("include_movies"),
                 "include_tv_shows": addon.getSettingBool("include_tv_shows"),
-                "allowed_original_languages": addon.getSettingString("allowed_original_languages"),
-                "blocked_original_languages": addon.getSettingString("blocked_original_languages"),
                 "allow_dubbed_content": addon.getSettingBool("allow_dubbed_content"),
-                "max_content_rating": addon.getSettingString("max_content_rating"),
-                "exclude_kids_content": addon.getSettingBool("exclude_kids_content"),
-                "blocked_content_ratings": addon.getSettingString("blocked_content_ratings"),
-                "exclude_reality_and_talk": addon.getSettingBool("exclude_reality_and_talk"),
-                "exclude_standup": addon.getSettingBool("exclude_standup"),
-                "exclude_documentaries": addon.getSettingBool("exclude_documentaries"),
-                "blocked_genres": addon.getSettingString("blocked_genres"),
+                "filter_by_language": addon.getSettingBool("filter_by_language"),
+                "lang_other": addon.getSettingBool("lang_other"),
+                "filter_by_rating": addon.getSettingBool("filter_by_rating"),
+                "rating_unrated": addon.getSettingBool("rating_unrated"),
                 "min_user_rating": addon.getSettingNumber("min_user_rating"),
                 "min_release_year": addon.getSettingInt("min_release_year"),
             }
+            for lang_key in LANGUAGE_TOGGLE_MAP:
+                settings_dict[lang_key] = addon.getSettingBool(lang_key)
+            for rating_key in RATING_TOGGLE_MAP:
+                settings_dict[rating_key] = addon.getSettingBool(rating_key)
+            for genre_key in GENRE_TOGGLE_MAP:
+                settings_dict[genre_key] = addon.getSettingBool(genre_key)
             return LibraryFilterPolicy.from_kodi_settings(settings_dict)
         except Exception:
             return LibraryFilterPolicy.permissive_default()

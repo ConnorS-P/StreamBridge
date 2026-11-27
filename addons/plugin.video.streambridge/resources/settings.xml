@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <settings version="1">
     <section id="plugin.video.streambridge">
+        <!-- Category 1: General & Library -->
         <category id="general" label="30000" help="">
             <group id="export_paths" label="30010">
                 <setting id="export_root" type="path" label="30100" help="30101">
@@ -13,14 +14,14 @@
                         <heading>30102</heading>
                     </control>
                 </setting>
-                <setting id="write_nfo" type="boolean" label="30103" help="30104">
-                    <level>1</level>
-                    <default>false</default>
+                <setting id="include_movies" type="boolean" label="30109" help="30110">
+                    <level>0</level>
+                    <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="export_unaired" type="boolean" label="30105" help="30106">
-                    <level>1</level>
-                    <default>false</default>
+                <setting id="include_tv_shows" type="boolean" label="30111" help="30112">
+                    <level>0</level>
+                    <default>true</default>
                     <control type="toggle"/>
                 </setting>
                 <setting id="sync_on_startup" type="boolean" label="30107" help="30108">
@@ -28,94 +29,228 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="export_unaired" type="boolean" label="30105" help="30106">
+                    <level>1</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="write_nfo" type="boolean" label="30103" help="30104">
+                    <level>1</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
             </group>
         </category>
-        <category id="filters" label="30003" help="">
-            <group id="language_filters" label="30013">
-                <setting id="allowed_original_languages" type="string" label="30400" help="30401">
-                    <level>0</level>
-                    <default>en</default>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30400</heading>
-                    </control>
-                </setting>
-                <setting id="blocked_original_languages" type="string" label="30402" help="30403">
-                    <level>0</level>
-                    <default/>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30402</heading>
-                    </control>
-                </setting>
-                <setting id="allow_dubbed_content" type="boolean" label="30404" help="30405">
+
+        <!-- Category 2: Languages & Dubbing Submenu -->
+        <category id="languages" label="30003" help="">
+            <group id="dubbing_mode" label="30013">
+                <setting id="allow_dubbed_content" type="boolean" label="30400" help="30401">
                     <level>0</level>
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
-            </group>
-            <group id="rating_filters" label="30014">
-                <setting id="max_content_rating" type="string" label="30406" help="30407">
-                    <level>0</level>
-                    <default>any</default>
-                    <constraints>
-                        <options>
-                            <option label="30408">any</option>
-                            <option label="30409">G</option>
-                            <option label="30410">PG</option>
-                            <option label="30411">PG-13</option>
-                            <option label="30412">R</option>
-                        </options>
-                    </constraints>
-                    <control type="spinner" format="string"/>
-                </setting>
-                <setting id="exclude_kids_content" type="boolean" label="30413" help="30414">
-                    <level>0</level>
-                    <default>false</default>
-                    <control type="toggle"/>
-                </setting>
-                <setting id="blocked_content_ratings" type="string" label="30415" help="30416">
-                    <level>1</level>
-                    <default/>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30415</heading>
-                    </control>
-                </setting>
-            </group>
-            <group id="genre_quality_filters" label="30015">
-                <setting id="exclude_reality_and_talk" type="boolean" label="30417" help="30418">
+                <setting id="filter_by_language" type="boolean" label="30402" help="30403">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="exclude_standup" type="boolean" label="30419" help="30420">
+            </group>
+            <group id="language_toggles" label="30014">
+                <setting id="lang_en" type="boolean" label="30410" help="">
                     <level>0</level>
-                    <default>false</default>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
                     <control type="toggle"/>
                 </setting>
-                <setting id="exclude_documentaries" type="boolean" label="30421" help="30422">
+                <setting id="lang_ja" type="boolean" label="30411" help="">
                     <level>0</level>
                     <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
                     <control type="toggle"/>
                 </setting>
-                <setting id="blocked_genres" type="string" label="30423" help="30424">
+                <setting id="lang_ko" type="boolean" label="30412" help="">
                     <level>0</level>
-                    <default/>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30423</heading>
-                    </control>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
                 </setting>
-                <setting id="min_user_rating" type="number" label="30425" help="30426">
+                <setting id="lang_es" type="boolean" label="30413" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_fr" type="boolean" label="30414" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_de" type="boolean" label="30415" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_it" type="boolean" label="30416" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_pt" type="boolean" label="30417" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_zh" type="boolean" label="30418" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_hi" type="boolean" label="30419" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_tr" type="boolean" label="30420" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_pl" type="boolean" label="30421" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_scand" type="boolean" label="30422" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="lang_other" type="boolean" label="30423" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_language">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
+
+        <!-- Category 3: Content Ratings Submenu -->
+        <category id="ratings" label="30004" help="">
+            <group id="rating_toggles" label="30015">
+                <setting id="filter_by_rating" type="boolean" label="30500" help="30501">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_tv_y" type="boolean" label="30510" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_tv_y7" type="boolean" label="30511" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_g" type="boolean" label="30512" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_pg" type="boolean" label="30513" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_pg13" type="boolean" label="30514" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_r" type="boolean" label="30515" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_nc17" type="boolean" label="30516" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="rating_unrated" type="boolean" label="30517" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="enable" setting="filter_by_rating">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
+
+        <!-- Category 4: Genres & Quality Submenu -->
+        <category id="genres_quality" label="30005" help="">
+            <group id="quality_era_group" label="30016">
+                <setting id="min_user_rating" type="number" label="30600" help="30601">
                     <level>0</level>
                     <default>0.0</default>
                     <constraints>
@@ -125,30 +260,137 @@
                     </constraints>
                     <control type="slider" format="number"/>
                 </setting>
-                <setting id="min_release_year" type="integer" label="30427" help="30428">
+                <setting id="min_release_year" type="integer" label="30602" help="30603">
                     <level>0</level>
                     <default>0</default>
                     <constraints>
-                        <minimum>0</minimum>
-                        <step>1</step>
-                        <maximum>2030</maximum>
+                        <options>
+                            <option label="30610">0</option>
+                            <option label="30611">1950</option>
+                            <option label="30612">1960</option>
+                            <option label="30613">1970</option>
+                            <option label="30614">1980</option>
+                            <option label="30615">1990</option>
+                            <option label="30616">2000</option>
+                            <option label="30617">2010</option>
+                            <option label="30618">2020</option>
+                        </options>
                     </constraints>
-                    <control type="edit" format="integer">
-                        <heading>30427</heading>
+                    <control type="list" format="string">
+                        <heading>30602</heading>
                     </control>
                 </setting>
-                <setting id="include_movies" type="boolean" label="30429" help="30430">
+            </group>
+            <group id="genre_toggles" label="30017">
+                <setting id="genre_action" type="boolean" label="30620" help="">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="include_tv_shows" type="boolean" label="30431" help="30432">
+                <setting id="genre_animation" type="boolean" label="30621" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_anime" type="boolean" label="30622" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_comedy" type="boolean" label="30623" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_crime" type="boolean" label="30624" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_documentary" type="boolean" label="30625" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_drama" type="boolean" label="30626" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_family" type="boolean" label="30627" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_fantasy_scifi" type="boolean" label="30628" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_history" type="boolean" label="30629" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_horror" type="boolean" label="30630" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_musical" type="boolean" label="30631" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_mystery_thriller" type="boolean" label="30632" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_reality" type="boolean" label="30633" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_romance" type="boolean" label="30634" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_soap" type="boolean" label="30635" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_sports" type="boolean" label="30636" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_standup" type="boolean" label="30637" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_talk_game" type="boolean" label="30638" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_war" type="boolean" label="30639" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="genre_western" type="boolean" label="30640" help="">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
             </group>
         </category>
+
+        <!-- Category 5: Providers -->
         <category id="providers" label="30001" help="">
             <group id="netflix_config" label="30011">
                 <setting id="netflix_enabled" type="boolean" label="30200" help="30201">
@@ -165,12 +407,31 @@
                             <option label="30205">watchmode</option>
                         </options>
                     </constraints>
-                    <control type="spinner" format="string"/>
+                    <control type="list" format="string">
+                        <heading>30202</heading>
+                    </control>
                 </setting>
                 <setting id="region" type="string" label="30207" help="30208">
                     <level>0</level>
                     <default>US</default>
-                    <control type="edit" format="string">
+                    <constraints>
+                        <options>
+                            <option label="30220">US</option>
+                            <option label="30221">GB</option>
+                            <option label="30222">CA</option>
+                            <option label="30223">AU</option>
+                            <option label="30224">DE</option>
+                            <option label="30225">FR</option>
+                            <option label="30226">JP</option>
+                            <option label="30227">KR</option>
+                            <option label="30228">BR</option>
+                            <option label="30229">ES</option>
+                            <option label="30230">IT</option>
+                            <option label="30231">NL</option>
+                            <option label="30232">SE</option>
+                        </options>
+                    </constraints>
+                    <control type="list" format="string">
                         <heading>30207</heading>
                     </control>
                 </setting>
@@ -187,6 +448,8 @@
                 </setting>
             </group>
         </category>
+
+        <!-- Category 6: Playback & Security -->
         <category id="playback_security" label="30002" help="">
             <group id="playback_group" label="30012">
                 <setting id="preferred_backend" type="string" label="30300" help="30301">
@@ -200,7 +463,9 @@
                             <option label="30305">netflix_app</option>
                         </options>
                     </constraints>
-                    <control type="spinner" format="string"/>
+                    <control type="list" format="string">
+                        <heading>30300</heading>
+                    </control>
                 </setting>
                 <setting id="clear_browser_session" type="action" label="30306" help="30307">
                     <level>0</level>

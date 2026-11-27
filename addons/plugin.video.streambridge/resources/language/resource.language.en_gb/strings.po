@@ -16,13 +16,13 @@ msgstr ""
 "Language: en_GB\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-# Categories (30000 - 30009)
+# Left-Hand Submenu Categories (30000 - 30009)
 msgctxt "#30000"
-msgid "General & Library Export"
+msgid "General & Library"
 msgstr ""
 
 msgctxt "#30001"
-msgid "Providers & Catalogs"
+msgid "Providers"
 msgstr ""
 
 msgctxt "#30002"
@@ -30,12 +30,20 @@ msgid "Playback & Security"
 msgstr ""
 
 msgctxt "#30003"
-msgid "Library Filters"
+msgid "Languages & Dubbing"
 msgstr ""
 
-# Groups (30010 - 30019)
+msgctxt "#30004"
+msgid "Content Ratings"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Genres & Quality"
+msgstr ""
+
+# Section Groups (30010 - 30029)
 msgctxt "#30010"
-msgid "Library Projection"
+msgid "Library Projection & Media Types"
 msgstr ""
 
 msgctxt "#30011"
@@ -47,15 +55,23 @@ msgid "Playback Backend & Session Security"
 msgstr ""
 
 msgctxt "#30013"
-msgid "Language & Dubbing Filters"
+msgid "Dubbing & Language Filter Mode"
 msgstr ""
 
 msgctxt "#30014"
-msgid "Content & Maturity Rating Filters"
+msgid "Allowed Original Spoken Languages"
 msgstr ""
 
 msgctxt "#30015"
-msgid "Genre, Format & Quality Filters"
+msgid "Allowed Movie & TV Maturity Ratings"
+msgstr ""
+
+msgctxt "#30016"
+msgid "Minimum Score & Release Era"
+msgstr ""
+
+msgctxt "#30017"
+msgid "Allowed Genres & Formats"
 msgstr ""
 
 # General & Library Export Settings (30100 - 30119)
@@ -95,7 +111,23 @@ msgctxt "#30108"
 msgid "Automatically queue a background catalog sync when Kodi starts."
 msgstr ""
 
-# Providers & Catalogs Settings (30200 - 30229)
+msgctxt "#30109"
+msgid "Export Movies"
+msgstr ""
+
+msgctxt "#30110"
+msgid "Include streaming movies in library export."
+msgstr ""
+
+msgctxt "#30111"
+msgid "Export TV Series"
+msgstr ""
+
+msgctxt "#30112"
+msgid "Include streaming TV series and episodes in library export."
+msgstr ""
+
+# Providers Settings (30200 - 30239)
 msgctxt "#30200"
 msgid "Enable Netflix Provider"
 msgstr ""
@@ -121,11 +153,11 @@ msgid "Watchmode API"
 msgstr ""
 
 msgctxt "#30207"
-msgid "Catalog Region (ISO-3166-1 alpha-2)"
+msgid "Catalog Region"
 msgstr ""
 
 msgctxt "#30208"
-msgid "Two-letter country code used for regional streaming availability (e.g. US, GB, CA, DE)."
+msgid "Select your streaming catalog region."
 msgstr ""
 
 msgctxt "#30209"
@@ -134,6 +166,58 @@ msgstr ""
 
 msgctxt "#30210"
 msgid "Optional Watchmode API key for live regional Netflix catalog ingestion."
+msgstr ""
+
+msgctxt "#30220"
+msgid "United States (US)"
+msgstr ""
+
+msgctxt "#30221"
+msgid "United Kingdom (GB)"
+msgstr ""
+
+msgctxt "#30222"
+msgid "Canada (CA)"
+msgstr ""
+
+msgctxt "#30223"
+msgid "Australia (AU)"
+msgstr ""
+
+msgctxt "#30224"
+msgid "Germany (DE)"
+msgstr ""
+
+msgctxt "#30225"
+msgid "France (FR)"
+msgstr ""
+
+msgctxt "#30226"
+msgid "Japan (JP)"
+msgstr ""
+
+msgctxt "#30227"
+msgid "South Korea (KR)"
+msgstr ""
+
+msgctxt "#30228"
+msgid "Brazil (BR)"
+msgstr ""
+
+msgctxt "#30229"
+msgid "Spain (ES)"
+msgstr ""
+
+msgctxt "#30230"
+msgid "Italy (IT)"
+msgstr ""
+
+msgctxt "#30231"
+msgid "Netherlands (NL)"
+msgstr ""
+
+msgctxt "#30232"
+msgid "Sweden (SE)"
 msgstr ""
 
 # Playback & Security Settings (30300 - 30329)
@@ -169,135 +253,253 @@ msgctxt "#30307"
 msgid "Wipes the isolated DPAPI-encrypted browser profile directory used for streaming logins."
 msgstr ""
 
-# Library Filters Settings (30400 - 30449)
+# Languages & Dubbing Submenu Radio Buttons (30400 - 30439)
 msgctxt "#30400"
-msgid "Allowed Original Languages (Whitelist)"
+msgid "Allow Dubbed Foreign-Language Content"
 msgstr ""
 
 msgctxt "#30401"
-msgid "Comma-separated ISO-639-1 language codes allowed into your library (e.g. 'en' for native English only, 'en,ja' for English + Japanese, or '*' for all languages)."
+msgid "When off, foreign-language productions dubbed into your language are filtered out so only native-language titles appear."
 msgstr ""
 
 msgctxt "#30402"
-msgid "Blocked Original Languages (Blacklist)"
+msgid "Filter by Original Spoken Language"
 msgstr ""
 
 msgctxt "#30403"
-msgid "Comma-separated ISO-639-1 original language codes to always exclude (e.g. 'hi,tr,ko,es')."
-msgstr ""
-
-msgctxt "#30404"
-msgid "Allow dubbed foreign-language content"
-msgstr ""
-
-msgctxt "#30405"
-msgid "When disabled, foreign-language movies/shows dubbed into your language are filtered out so only native-language productions are exported."
-msgstr ""
-
-msgctxt "#30406"
-msgid "Maximum Maturity / Content Rating"
-msgstr ""
-
-msgctxt "#30407"
-msgid "Exclude titles rated above this maturity threshold."
-msgstr ""
-
-msgctxt "#30408"
-msgid "Any (Unrestricted)"
-msgstr ""
-
-msgctxt "#30409"
-msgid "G / TV-G"
+msgid "Enable individual radio-button filtering for original production languages below."
 msgstr ""
 
 msgctxt "#30410"
-msgid "PG / TV-PG"
+msgid "English"
 msgstr ""
 
 msgctxt "#30411"
-msgid "PG-13 / TV-14"
+msgid "Japanese"
 msgstr ""
 
 msgctxt "#30412"
-msgid "R / TV-MA"
+msgid "Korean"
 msgstr ""
 
 msgctxt "#30413"
-msgid "Exclude Kids & Toddler Content (TV-Y, TV-Y7, G)"
+msgid "Spanish"
 msgstr ""
 
 msgctxt "#30414"
-msgid "Automatically filter out children's and toddler programming from your library."
+msgid "French"
 msgstr ""
 
 msgctxt "#30415"
-msgid "Blocked Content Ratings (Blacklist)"
+msgid "German"
 msgstr ""
 
 msgctxt "#30416"
-msgid "Optional comma-separated content ratings to block (e.g. 'TV-Y,TV-Y7,NC-17')."
+msgid "Italian"
 msgstr ""
 
 msgctxt "#30417"
-msgid "Exclude Reality TV, Talk Shows & Game Shows"
+msgid "Portuguese"
 msgstr ""
 
 msgctxt "#30418"
-msgid "Filters out unscripted reality TV, dating/cooking competitions, talk shows, and game shows."
+msgid "Chinese (Mandarin & Cantonese)"
 msgstr ""
 
 msgctxt "#30419"
-msgid "Exclude Stand-Up Comedy Specials"
+msgid "Hindi & Indian Languages (Tamil, Telugu, Malayalam)"
 msgstr ""
 
 msgctxt "#30420"
-msgid "Prevents stand-up comedy specials from cluttering your Movies library."
+msgid "Turkish"
 msgstr ""
 
 msgctxt "#30421"
-msgid "Exclude Documentaries & Docuseries"
+msgid "Polish"
 msgstr ""
 
 msgctxt "#30422"
-msgid "Filters out documentary films and docuseries."
+msgid "Nordic & Scandinavian (Swedish, Danish, Norwegian, Finnish)"
 msgstr ""
 
 msgctxt "#30423"
-msgid "Blocked Genres (Blacklist)"
+msgid "All Other Original Languages"
 msgstr ""
 
-msgctxt "#30424"
-msgid "Optional comma-separated genre names to exclude (e.g. 'Musical,Soap,Western')."
+# Content Ratings Submenu Radio Buttons (30500 - 30529)
+msgctxt "#30500"
+msgid "Filter by Content / Maturity Rating"
 msgstr ""
 
-msgctxt "#30425"
+msgctxt "#30501"
+msgid "Enable individual maturity rating radio-button toggles below."
+msgstr ""
+
+msgctxt "#30510"
+msgid "TV-Y (All Children / Toddler)"
+msgstr ""
+
+msgctxt "#30511"
+msgid "TV-Y7 / TV-Y7-FV (Older Children)"
+msgstr ""
+
+msgctxt "#30512"
+msgid "G / TV-G (General Audience)"
+msgstr ""
+
+msgctxt "#30513"
+msgid "PG / TV-PG (Parental Guidance Suggested)"
+msgstr ""
+
+msgctxt "#30514"
+msgid "PG-13 / TV-14 (Parents Strongly Cautioned)"
+msgstr ""
+
+msgctxt "#30515"
+msgid "R / TV-MA (Mature Audience)"
+msgstr ""
+
+msgctxt "#30516"
+msgid "NC-17 (Adults Only)"
+msgstr ""
+
+msgctxt "#30517"
+msgid "Unrated / NR / Unknown Rating"
+msgstr ""
+
+# Genres & Quality Submenu Radio Buttons (30600 - 30659)
+msgctxt "#30600"
 msgid "Minimum IMDb / User Rating (0.0 - 9.0)"
 msgstr ""
 
-msgctxt "#30426"
-msgid "Filter out low-rated filler below this score on a 0-10 scale (0.0 disables score filtering)."
+msgctxt "#30601"
+msgid "Exclude low-rated filler below this score on a 0-10 scale (0.0 allows all scores)."
 msgstr ""
 
-msgctxt "#30427"
-msgid "Minimum Release Year"
+msgctxt "#30602"
+msgid "Minimum Release Era"
 msgstr ""
 
-msgctxt "#30428"
-msgid "Exclude titles released before this year (0 allows all years)."
+msgctxt "#30603"
+msgid "Exclude titles released prior to the selected decade."
 msgstr ""
 
-msgctxt "#30429"
-msgid "Export Movies"
+msgctxt "#30610"
+msgid "All Years"
 msgstr ""
 
-msgctxt "#30430"
-msgid "Include streaming movies in library export."
+msgctxt "#30611"
+msgid "1950s and Newer (1950+)"
 msgstr ""
 
-msgctxt "#30431"
-msgid "Export TV Series"
+msgctxt "#30612"
+msgid "1960s and Newer (1960+)"
 msgstr ""
 
-msgctxt "#30432"
-msgid "Include streaming TV series and episodes in library export."
+msgctxt "#30613"
+msgid "1970s and Newer (1970+)"
+msgstr ""
+
+msgctxt "#30614"
+msgid "1980s and Newer (1980+)"
+msgstr ""
+
+msgctxt "#30615"
+msgid "1990s and Newer (1990+)"
+msgstr ""
+
+msgctxt "#30616"
+msgid "2000s and Newer (2000+)"
+msgstr ""
+
+msgctxt "#30617"
+msgid "2010s and Newer (2010+)"
+msgstr ""
+
+msgctxt "#30618"
+msgid "2020s and Newer (2020+)"
+msgstr ""
+
+msgctxt "#30620"
+msgid "Action & Adventure"
+msgstr ""
+
+msgctxt "#30621"
+msgid "Animation"
+msgstr ""
+
+msgctxt "#30622"
+msgid "Anime"
+msgstr ""
+
+msgctxt "#30623"
+msgid "Comedy"
+msgstr ""
+
+msgctxt "#30624"
+msgid "Crime"
+msgstr ""
+
+msgctxt "#30625"
+msgid "Documentary & Docuseries"
+msgstr ""
+
+msgctxt "#30626"
+msgid "Drama"
+msgstr ""
+
+msgctxt "#30627"
+msgid "Family & Kids"
+msgstr ""
+
+msgctxt "#30628"
+msgid "Fantasy & Sci-Fi"
+msgstr ""
+
+msgctxt "#30629"
+msgid "History & Biography"
+msgstr ""
+
+msgctxt "#30630"
+msgid "Horror"
+msgstr ""
+
+msgctxt "#30631"
+msgid "Music & Musicals"
+msgstr ""
+
+msgctxt "#30632"
+msgid "Mystery & Thriller"
+msgstr ""
+
+msgctxt "#30633"
+msgid "Reality TV (Dating, Cooking, Unscripted)"
+msgstr ""
+
+msgctxt "#30634"
+msgid "Romance"
+msgstr ""
+
+msgctxt "#30635"
+msgid "Soap Opera"
+msgstr ""
+
+msgctxt "#30636"
+msgid "Sports"
+msgstr ""
+
+msgctxt "#30637"
+msgid "Stand-Up Comedy Specials"
+msgstr ""
+
+msgctxt "#30638"
+msgid "Talk Shows & Game Shows"
+msgstr ""
+
+msgctxt "#30639"
+msgid "War"
+msgstr ""
+
+msgctxt "#30640"
+msgid "Western"
 msgstr ""
