@@ -10,7 +10,6 @@ Responsibilities (Section 1 & Section 3 of Design v0.1):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from streambridge_core.adapters.base import ProviderAdapter
 from streambridge_core.adapters.fixture import FixtureAdapter
@@ -34,16 +33,16 @@ except ImportError:
             return True
 
 
-class StreamBridgeServiceMonitor(_BaseMonitor):
+class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
     """Kodi `xbmc.Monitor` subclass managing non-blocking catalog sync and scan/clean hooks."""
 
     def __init__(
         self,
-        store: Optional[StreamBridgeStore] = None,
-        export_root: Optional[Path] = None,
-        adapter: Optional[ProviderAdapter] = None,
-        kodi_bridge: Optional[KodiBridge] = None,
-        kodi_rpc: Optional[KodiJsonRpcClient] = None,
+        store: StreamBridgeStore | None = None,
+        export_root: Path | None = None,
+        adapter: ProviderAdapter | None = None,
+        kodi_bridge: KodiBridge | None = None,
+        kodi_rpc: KodiJsonRpcClient | None = None,
         region: str = "US",
     ) -> None:
         super().__init__()

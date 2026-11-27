@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from .models import MediaType, PlaybackState, Title
 
@@ -22,7 +23,7 @@ class KodiJsonRpcClient:
 
     def __init__(
         self,
-        rpc_Transport: Optional[Callable[[str], str]] = None,
+        rpc_Transport: Callable[[str], str] | None = None,
         self_trigger_ttl_seconds: float = 30.0,
     ) -> None:
         self._transport = rpc_Transport or self._default_kodi_transport
@@ -43,7 +44,7 @@ class KodiJsonRpcClient:
         except ImportError:
             return json.dumps({"jsonrpc": "2.0", "id": 1, "result": "OK"})
 
-    def call(self, method: str, params: Optional[dict[str, Any]] = None) -> Any:
+    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """Invoke a JSON-RPC v13.5 method and return `result`."""
         payload: dict[str, Any] = {
             "jsonrpc": "2.0",
@@ -89,7 +90,7 @@ class KodiJsonRpcClient:
             self._pending_followup_clean = False
             return run_scan, run_clean
 
-    def request_targeted_scan(self, directory: Optional[str] = None, show_dialogs: bool = False) -> bool:
+    def request_targeted_scan(self, directory: str | None = None, show_dialogs: bool = False) -> bool:
         """Trigger `VideoLibrary.Scan` or queue a follow-up scan if Kodi is currently scanning."""
         with self._lock:
             if self._kodi_scanning:
@@ -103,7 +104,7 @@ class KodiJsonRpcClient:
         self.call("VideoLibrary.Scan", params)
         return True
 
-    def request_targeted_clean(self, directory: Optional[str] = None, show_dialogs: bool = False) -> bool:
+    def request_targeted_clean(self, directory: str | None = None, show_dialogs: bool = False) -> bool:
         """Trigger `VideoLibrary.Clean` or queue a follow-up clean if Kodi is currently busy."""
         with self._lock:
             if self._kodi_scanning:
@@ -118,7 +119,7 @@ class KodiJsonRpcClient:
         return True
 
     def sync_playback_state_to_kodi(
-        self, title: Title, state: PlaybackState, kodi_db_id: Optional[int] = None
+        self, title: Title, state: PlaybackState, kodi_db_id: int | None = None
     ) -> bool:
         """Push verified resume point and playcount to Kodi via JSON-RPC when `kodi_db_id` is known."""
         if kodi_db_id is None:

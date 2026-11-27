@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 
@@ -71,7 +71,7 @@ class RedactingLogFilter(logging.Filter):
 def validate_launch_url(
     url: str,
     provider: str,
-    allowed_hosts: Optional[Iterable[str]] = None,
+    allowed_hosts: Iterable[str] | None = None,
 ) -> str:
     """Validate that a playback launch URL is strictly HTTPS and matches the provider's allowlist."""
     if not url or not isinstance(url, str):
@@ -184,7 +184,7 @@ def dpapi_unprotect(token: str) -> str:
         kernel32.LocalFree(out_blob.pbData)
 
 
-def get_isolated_browser_profile_dir(base_dir: Optional[Path] = None) -> Path:
+def get_isolated_browser_profile_dir(base_dir: Path | None = None) -> Path:
     """Return the path to the isolated WebView2 / browser profile directory."""
     if base_dir is not None:
         profile_dir = Path(base_dir) / "BrowserProfile"
@@ -205,7 +205,7 @@ def get_isolated_browser_profile_dir(base_dir: Optional[Path] = None) -> Path:
     return profile_dir
 
 
-def clear_isolated_browser_profile(base_dir: Optional[Path] = None) -> bool:
+def clear_isolated_browser_profile(base_dir: Path | None = None) -> bool:
     """Wipe the isolated browser profile directory so the user can sign out cleanly."""
     profile_dir = get_isolated_browser_profile_dir(base_dir)
     if profile_dir.exists():

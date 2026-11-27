@@ -8,9 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import threading
 import time
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest

@@ -21,7 +21,7 @@ import platform
 import shutil
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from .models import LaunchDescriptor, PlaybackSessionState, SessionEvent
 from .providers import ProviderDescriptor, load_provider_descriptor
@@ -35,16 +35,16 @@ class PlatformEnvironment:
     os_family: str  # "windows", "linux", "macos", "android", "libreelec"
     is_windows: bool
     has_native_companion_exe: bool
-    companion_exe_path: Optional[Path]
+    companion_exe_path: Path | None
     has_companion_kodi_addon: bool
-    desktop_browser_cmd: Optional[list[str]]
+    desktop_browser_cmd: list[str] | None
 
 
 def detect_platform_environment(
-    companion_exe_path: Optional[Path] = None,
-    has_kodi_addon_check: Optional[Callable[[str], bool]] = None,
+    companion_exe_path: Path | None = None,
+    has_kodi_addon_check: Callable[[str], bool] | None = None,
     provider_id: str = "netflix",
-    platform_override: Optional[str] = None,
+    platform_override: str | None = None,
 ) -> PlatformEnvironment:
     """Detect the current platform and available playback pathways."""
     raw_platform = (platform_override or sys.platform).lower()
@@ -64,7 +64,7 @@ def detect_platform_environment(
         else:
             os_family = "linux"
 
-    resolved_exe: Optional[Path] = None
+    resolved_exe: Path | None = None
     if is_windows and companion_exe_path and Path(companion_exe_path).exists():
         resolved_exe = Path(companion_exe_path)
 
@@ -87,7 +87,7 @@ def detect_platform_environment(
     )
 
 
-def _find_desktop_browser(os_family: str) -> Optional[list[str]]:
+def _find_desktop_browser(os_family: str) -> list[str] | None:
     """Locate an installed browser binary without using `shell=True`."""
     if os_family == "windows":
         candidates = [
@@ -118,7 +118,7 @@ def _find_desktop_browser(os_family: str) -> Optional[list[str]]:
 def build_non_windows_fallback_plan(
     descriptor: LaunchDescriptor,
     env: PlatformEnvironment,
-    provider_descriptor: Optional[ProviderDescriptor] = None,
+    provider_descriptor: ProviderDescriptor | None = None,
 ) -> dict[str, str]:
     """Determine the safest non-Windows playback action for `descriptor`.
 

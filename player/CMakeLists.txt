@@ -33,5 +33,5 @@ target_link_libraries(StreamBridge.Player PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(StreamBridge.Player PRIVATE /W4 /EHsc /utf-8)
+    target_compile_options(StreamBridge.Player PRIVATE /W4 /WX /EHsc /utf-8)
 endif()

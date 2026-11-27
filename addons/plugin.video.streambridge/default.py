@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 from streambridge_core.adapters.base import ProviderAdapter
@@ -67,7 +68,7 @@ class _FallbackPluginRouter:
                 return f"{self.base_url}/{'/'.join(built)}" if built else f"{self.base_url}/"
         return f"{self.base_url}/"
 
-    def run(self, argv: Optional[list[str]] = None) -> Any:
+    def run(self, argv: list[str] | None = None) -> Any:
         args = argv if argv is not None else sys.argv
         raw_url = args[0] if args else f"{self.base_url}/"
         self.handle = int(args[1]) if len(args) > 1 and str(args[1]).lstrip("-").isdigit() else -1
@@ -84,7 +85,7 @@ class _FallbackPluginRouter:
                 continue
             kwargs: dict[str, str] = {}
             matched = True
-            for rp, pp in zip(route_parts, path_parts):
+            for rp, pp in zip(route_parts, path_parts, strict=False):
                 if rp.startswith("<") and rp.endswith(">"):
                     kwargs[rp[1:-1]] = pp
                 elif rp != pp:
@@ -103,12 +104,12 @@ class StreamBridgePluginApp:
 
     def __init__(
         self,
-        store: Optional[StreamBridgeStore] = None,
-        export_root: Optional[Path] = None,
-        adapter: Optional[ProviderAdapter] = None,
-        broker: Optional[PlaybackBroker] = None,
-        kodi_bridge: Optional[KodiBridge] = None,
-        kodi_rpc: Optional[KodiJsonRpcClient] = None,
+        store: StreamBridgeStore | None = None,
+        export_root: Path | None = None,
+        adapter: ProviderAdapter | None = None,
+        broker: PlaybackBroker | None = None,
+        kodi_bridge: KodiBridge | None = None,
+        kodi_rpc: KodiJsonRpcClient | None = None,
     ) -> None:
         self.kodi = kodi_bridge or KodiBridge("plugin.video.streambridge")
         self.rpc = kodi_rpc or KodiJsonRpcClient()
@@ -136,8 +137,8 @@ class StreamBridgePluginApp:
     def build_adapter(
         self,
         mode: str = "fixture",
-        watchmode_api_key: Optional[str] = None,
-        tmdb_api_key: Optional[str] = None,
+        watchmode_api_key: str | None = None,
+        tmdb_api_key: str | None = None,
     ) -> ProviderAdapter:
         if mode in ("watchmode", "tmdb") and (watchmode_api_key or tmdb_api_key):
             return NetflixCatalogAdapter(
@@ -187,7 +188,7 @@ class StreamBridgePluginApp:
             preferred_backend=preferred_backend,
         )
 
-    def clear_auth_session(self, base_dir: Optional[Path] = None) -> bool:
+    def clear_auth_session(self, base_dir: Path | None = None) -> bool:
         cleared = clear_isolated_browser_profile(base_dir=base_dir)
         self.kodi.notify(
             "StreamBridge Security",
@@ -196,7 +197,7 @@ class StreamBridgePluginApp:
         return cleared
 
 
-_ACTIVE_APP: Optional[StreamBridgePluginApp] = None
+_ACTIVE_APP: StreamBridgePluginApp | None = None
 
 
 def get_app() -> StreamBridgePluginApp:
@@ -206,7 +207,7 @@ def get_app() -> StreamBridgePluginApp:
     return _ACTIVE_APP
 
 
-def set_app(app: Optional[StreamBridgePluginApp]) -> None:
+def set_app(app: StreamBridgePluginApp | None) -> None:
     global _ACTIVE_APP
     _ACTIVE_APP = app
 

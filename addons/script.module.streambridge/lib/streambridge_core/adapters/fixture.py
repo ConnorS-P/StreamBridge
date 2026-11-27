@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import time
-from typing import Any, Optional
+from typing import Any
 import uuid
 
 from ..db import StreamBridgeStore
@@ -35,23 +35,23 @@ class FixtureAdapter(ProviderAdapter):
     def __init__(
         self,
         store: StreamBridgeStore,
-        fixture_path: Optional[Path | str] = None,
+        fixture_path: Path | str | None = None,
         provider_id: str = "netflix",
-        descriptor: Optional[ProviderDescriptor] = None,
+        descriptor: ProviderDescriptor | None = None,
     ) -> None:
         self.store = store
         self.provider_id = provider_id
         self.descriptor = descriptor or load_provider_descriptor(provider_id)
         self.fixture_path = Path(fixture_path) if fixture_path else None
-        self._override_payload: Optional[dict[str, Any]] = None
-        self._simulate_failure: Optional[str] = None
-        self._last_refresh: Optional[float] = None
+        self._override_payload: dict[str, Any] | None = None
+        self._simulate_failure: str | None = None
+        self._last_refresh: float | None = None
 
-    def set_override_payload(self, payload: Optional[dict[str, Any]]) -> None:
+    def set_override_payload(self, payload: dict[str, Any] | None) -> None:
         """Override the JSON fixture data in memory (used by Gate G1/G2 tests)."""
         self._override_payload = payload
 
-    def set_simulated_failure(self, error_message: Optional[str]) -> None:
+    def set_simulated_failure(self, error_message: str | None) -> None:
         """Simulate an offline/rate-limit/auth failure on the next `refresh_catalog` call."""
         self._simulate_failure = error_message
 
@@ -66,7 +66,7 @@ class FixtureAdapter(ProviderAdapter):
         )
 
     def refresh_catalog(
-        self, region: str = "US", cursor: Optional[str] = None
+        self, region: str = "US", cursor: str | None = None
     ) -> CatalogBatch:
         if self._simulate_failure:
             return CatalogBatch(

@@ -1,0 +1,6 @@
+# Require repository owner approval on all pull requests and sensitive paths
+* @ConnorS-P
+/.github/ @ConnorS-P
+/addons/repository.streambridge/ @ConnorS-P
+/player/ @ConnorS-P
+/scripts/ @ConnorS-P

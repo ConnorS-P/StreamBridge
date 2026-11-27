@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ..models import (
     AvailabilityState,
@@ -41,8 +40,8 @@ class CatalogBatch:
     completeness: SnapshotCompleteness
     status: str
     items: list[CatalogItem] = field(default_factory=list)
-    next_cursor: Optional[str] = None
-    error_summary: Optional[str] = None
+    next_cursor: str | None = None
+    error_summary: str | None = None
 
 
 @dataclass
@@ -65,8 +64,8 @@ class AdapterHealth:
     provider_id: str
     status: str
     auth_required: bool = False
-    last_successful_refresh: Optional[float] = None
-    error_message: Optional[str] = None
+    last_successful_refresh: float | None = None
+    error_message: str | None = None
 
 
 class ProviderAdapter(ABC):
@@ -80,7 +79,7 @@ class ProviderAdapter(ABC):
 
     @abstractmethod
     def refresh_catalog(
-        self, region: str = "US", cursor: Optional[str] = None
+        self, region: str = "US", cursor: str | None = None
     ) -> CatalogBatch:
         """Fetch a catalog snapshot or delta for `region`."""
 

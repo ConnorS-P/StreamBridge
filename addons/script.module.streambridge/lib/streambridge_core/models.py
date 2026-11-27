@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 import time
 import uuid
 
@@ -52,21 +52,21 @@ class Title:
     title_id: str
     media_type: MediaType
     title: str
-    year: Optional[int] = None
-    tmdb_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    parent_show_id: Optional[str] = None
-    show_title: Optional[str] = None
-    season: Optional[int] = None
-    episode: Optional[int] = None
-    edition: Optional[str] = None
-    premiered: Optional[str] = None
-    plot: Optional[str] = None
+    year: int | None = None
+    tmdb_id: str | None = None
+    imdb_id: str | None = None
+    parent_show_id: str | None = None
+    show_title: str | None = None
+    season: int | None = None
+    episode: int | None = None
+    edition: str | None = None
+    premiered: str | None = None
+    plot: str | None = None
     is_aired: bool = True
     original_language: str = "en"
     is_dubbed: bool = False
-    content_rating: Optional[str] = None
-    user_rating: Optional[float] = None
+    content_rating: str | None = None
+    user_rating: float | None = None
     genres: tuple[str, ...] = ()
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -94,10 +94,10 @@ class Offer:
     launch_url: str
     entitlement_class: str = "subscription"
     availability: AvailabilityState = AvailabilityState.AVAILABLE
-    last_seen_revision: Optional[str] = None
+    last_seen_revision: str | None = None
     last_seen_at: float = field(default_factory=time.time)
     missing_streak: int = 0
-    deep_link_url: Optional[str] = None
+    deep_link_url: str | None = None
 
 
 @dataclass
@@ -107,8 +107,8 @@ class Projection:
     title_id: str
     provider: str
     relative_path: str
-    nfo_relative_path: Optional[str] = None
-    kodi_db_id: Optional[int] = None
+    nfo_relative_path: str | None = None
+    kodi_db_id: int | None = None
     generation: int = 1
     owned_by_streambridge: bool = True
     updated_at: float = field(default_factory=time.time)
@@ -125,8 +125,8 @@ class Snapshot:
     completeness: SnapshotCompleteness
     status: str
     fetched_at: float = field(default_factory=time.time)
-    expires_at: Optional[float] = None
-    error_summary: Optional[str] = None
+    expires_at: float | None = None
+    error_summary: str | None = None
     item_count: int = 0
 
 
@@ -142,7 +142,7 @@ class PlaybackState:
     play_count: int = 0
     event_sequence: int = 0
     last_state: PlaybackSessionState = PlaybackSessionState.IDLE
-    last_error: Optional[str] = None
+    last_error: str | None = None
     updated_at: float = field(default_factory=time.time)
 
 
@@ -159,9 +159,9 @@ class LaunchDescriptor:
     title_display: str
     preferred_backend: str = "auto"
     resume_position_seconds: float = 0.0
-    tmdb_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    deep_link_url: Optional[str] = None
+    tmdb_id: str | None = None
+    imdb_id: str | None = None
+    deep_link_url: str | None = None
     extra_capabilities: dict[str, Any] = field(default_factory=dict)
 
 
@@ -173,10 +173,10 @@ class SessionEvent:
     title_id: str
     state: PlaybackSessionState
     sequence: int
-    position_seconds: Optional[float] = None
-    duration_seconds: Optional[float] = None
-    backend_used: Optional[str] = None
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
+    position_seconds: float | None = None
+    duration_seconds: float | None = None
+    backend_used: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
     telemetry_verified: bool = False
     timestamp: float = field(default_factory=time.time)

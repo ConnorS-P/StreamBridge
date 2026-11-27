@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from .adapters.base import ProviderAdapter
 from .db import StreamBridgeStore
@@ -47,8 +47,8 @@ class PlaybackSessionResult:
     final_state: PlaybackSessionState
     telemetry_verified: bool
     events: list[SessionEvent] = field(default_factory=list)
-    persisted_state: Optional[PlaybackState] = None
-    error_message: Optional[str] = None
+    persisted_state: PlaybackState | None = None
+    error_message: str | None = None
 
 
 class PlaybackBroker:
@@ -59,11 +59,11 @@ class PlaybackBroker:
     def __init__(
         self,
         store: StreamBridgeStore,
-        kodi_bridge: Optional[KodiBridge] = None,
-        kodi_rpc: Optional[KodiJsonRpcClient] = None,
-        ipc_client: Optional[NamedPipeClient] = None,
-        companion_exe_path: Optional[Path] = None,
-        browser_launcher: Optional[Callable[[str, str], object]] = None,
+        kodi_bridge: KodiBridge | None = None,
+        kodi_rpc: KodiJsonRpcClient | None = None,
+        ipc_client: NamedPipeClient | None = None,
+        companion_exe_path: Path | None = None,
+        browser_launcher: Callable[[str, str], object] | None = None,
     ) -> None:
         self.store = store
         self.kodi = kodi_bridge or KodiBridge()
@@ -78,7 +78,7 @@ class PlaybackBroker:
         title_id: str,
         profile: str = "default",
         preferred_backend: str = "auto",
-        platform_override: Optional[str] = None,
+        platform_override: str | None = None,
     ) -> PlaybackSessionResult:
         """Resolve `title_id` and execute a complete playback session lifecycle."""
         descriptor = adapter.resolve_offer(
@@ -173,8 +173,8 @@ class PlaybackBroker:
                 self.rpc.sync_playback_state_to_kodi(title, latest_state, kodi_db_id=proj.kodi_db_id)
 
         if final_state == PlaybackSessionState.FAILED:
-            err_msg = final_ev.error_message if final_ev else "Player reported failure"
-            self.kodi.notify("StreamBridge Playback Failed", err_msg or "Playback failed", error=True)
+            fail_msg: str | None = final_ev.error_message if final_ev else "Player reported failure"
+            self.kodi.notify("StreamBridge Playback Failed", fail_msg or "Playback failed", error=True)
             return PlaybackSessionResult(
                 session_id=descriptor.session_id,
                 title_id=descriptor.title_id,
@@ -183,7 +183,7 @@ class PlaybackBroker:
                 telemetry_verified=verified,
                 events=collected_events,
                 persisted_state=latest_state if verified else None,
-                error_message=err_msg,
+                error_message=fail_msg,
             )
 
         return PlaybackSessionResult(

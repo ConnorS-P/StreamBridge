@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Optional
 import xml.etree.ElementTree as ET
 
 from .models import MediaType, Offer, Projection, Title
@@ -84,7 +83,7 @@ class ProjectionEngine:
         """Return the stable internal plugin URI for a title."""
         return f"{STRM_URI_PREFIX}{title.title_id}\n"
 
-    def build_nfo_content(self, title: Title, offer: Optional[Offer] = None) -> str:
+    def build_nfo_content(self, title: Title, offer: Offer | None = None) -> str:
         """Build a minimal, standards-compliant Kodi XML NFO with an ownership comment."""
         root_tag = "episodedetails" if title.media_type == MediaType.EPISODE else "movie"
         root = ET.Element(root_tag)
@@ -167,7 +166,7 @@ class ProjectionEngine:
         except OSError:
             return False
 
-    def project_title(self, title: Title, offer: Offer) -> Optional[Projection]:
+    def project_title(self, title: Title, offer: Offer) -> Projection | None:
         """Atomically write the .strm and optional .nfo file for an available offer."""
         if not title.is_aired and not self.export_unaired:
             return None
@@ -184,7 +183,7 @@ class ProjectionEngine:
 
         self._atomic_write_text(strm_path, self.build_strm_content(title))
 
-        final_nfo_rel: Optional[str] = None
+        final_nfo_rel: str | None = None
         if self.write_nfo:
             # Only write or update NFO if it does not exist or is still owned by StreamBridge
             if not nfo_path.exists() or self.is_owned_nfo(nfo_path):

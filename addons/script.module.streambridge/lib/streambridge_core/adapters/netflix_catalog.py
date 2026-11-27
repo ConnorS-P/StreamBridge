@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 import uuid
 
 import requests
@@ -47,10 +47,10 @@ class NetflixCatalogAdapter(ProviderAdapter):
     def __init__(
         self,
         store: StreamBridgeStore,
-        watchmode_api_key: Optional[str] = None,
-        tmdb_api_key: Optional[str] = None,
-        descriptor: Optional[ProviderDescriptor] = None,
-        session: Optional[requests.Session] = None,
+        watchmode_api_key: str | None = None,
+        tmdb_api_key: str | None = None,
+        descriptor: ProviderDescriptor | None = None,
+        session: requests.Session | None = None,
         timeout_seconds: float = 15.0,
     ) -> None:
         self.store = store
@@ -65,8 +65,8 @@ class NetflixCatalogAdapter(ProviderAdapter):
             }
         )
         self.timeout_seconds = timeout_seconds
-        self._last_refresh: Optional[float] = None
-        self._last_error: Optional[str] = None
+        self._last_refresh: float | None = None
+        self._last_error: str | None = None
 
     def capabilities(self) -> AdapterCapabilities:
         return AdapterCapabilities(
@@ -79,7 +79,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
         )
 
     def refresh_catalog(
-        self, region: str = "US", cursor: Optional[str] = None
+        self, region: str = "US", cursor: str | None = None
     ) -> CatalogBatch:
         if self.watchmode_api_key:
             return self._refresh_from_watchmode(region=region, page=int(cursor or "1"))

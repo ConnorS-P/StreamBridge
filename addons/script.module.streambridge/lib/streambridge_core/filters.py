@@ -7,7 +7,7 @@ submenu settings (Languages & Dubbing, Content Ratings, and Genres & Quality).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from .models import MediaType, Title
 
@@ -215,7 +215,7 @@ class FilterDecision:
     """Result of evaluating a `Title` against a `LibraryFilterPolicy`."""
 
     allowed: bool
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 def evaluate_title_filter(title: Title, policy: LibraryFilterPolicy) -> FilterDecision:

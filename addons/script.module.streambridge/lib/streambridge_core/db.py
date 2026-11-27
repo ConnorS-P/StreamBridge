@@ -15,7 +15,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 from .models import (
     AvailabilityState,
@@ -150,7 +150,7 @@ class StreamBridgeStore:
         self._initialize_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn: Optional[sqlite3.Connection] = getattr(self._local, "conn", None)
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
         if conn is None:
             conn = sqlite3.connect(str(self.db_path), timeout=30.0)
             conn.row_factory = sqlite3.Row
@@ -162,7 +162,7 @@ class StreamBridgeStore:
 
     def close(self) -> None:
         """Close the current thread's SQLite connection if open."""
-        conn: Optional[sqlite3.Connection] = getattr(self._local, "conn", None)
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
         if conn is not None:
             conn.close()
             self._local.conn = None
@@ -206,7 +206,7 @@ class StreamBridgeStore:
         row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
         return int(row["value"]) if row else 0
 
-    def upsert_title(self, title: Title, conn: Optional[sqlite3.Connection] = None) -> Title:
+    def upsert_title(self, title: Title, conn: sqlite3.Connection | None = None) -> Title:
         """Insert or update a canonical title, preserving its existing `title_id` if matched by `canonical_key`."""
         if conn is None:
             with self.transaction() as tx_conn:
@@ -310,12 +310,12 @@ class StreamBridgeStore:
             )
         return title
 
-    def get_title(self, title_id: str) -> Optional[Title]:
+    def get_title(self, title_id: str) -> Title | None:
         conn = self._get_connection()
         row = conn.execute("SELECT * FROM titles WHERE title_id = ?", (title_id,)).fetchone()
         return self._row_to_title(row) if row else None
 
-    def list_titles(self, provider: Optional[str] = None, available_only: bool = True) -> list[Title]:
+    def list_titles(self, provider: str | None = None, available_only: bool = True) -> list[Title]:
         conn = self._get_connection()
         if provider:
             query = """
@@ -334,7 +334,7 @@ class StreamBridgeStore:
             ).fetchall()
         return [self._row_to_title(r) for r in rows]
 
-    def upsert_offer(self, offer: Offer, conn: Optional[sqlite3.Connection] = None) -> None:
+    def upsert_offer(self, offer: Offer, conn: sqlite3.Connection | None = None) -> None:
         if conn is None:
             with self.transaction() as tx_conn:
                 self.upsert_offer(offer, conn=tx_conn)
@@ -372,7 +372,7 @@ class StreamBridgeStore:
             ),
         )
 
-    def get_offers_for_title(self, title_id: str, provider: Optional[str] = None) -> list[Offer]:
+    def get_offers_for_title(self, title_id: str, provider: str | None = None) -> list[Offer]:
         conn = self._get_connection()
         if provider:
             rows = conn.execute(
@@ -394,7 +394,7 @@ class StreamBridgeStore:
                 return offer.availability
         return AvailabilityState.UNKNOWN
 
-    def get_provider_offers(self, provider: str, region: Optional[str] = None) -> list[Offer]:
+    def get_provider_offers(self, provider: str, region: str | None = None) -> list[Offer]:
         conn = self._get_connection()
         if region:
             rows = conn.execute(
@@ -408,7 +408,7 @@ class StreamBridgeStore:
             ).fetchall()
         return [self._row_to_offer(r) for r in rows]
 
-    def upsert_projection(self, projection: Projection, conn: Optional[sqlite3.Connection] = None) -> None:
+    def upsert_projection(self, projection: Projection, conn: sqlite3.Connection | None = None) -> None:
         if conn is None:
             with self.transaction() as tx_conn:
                 self.upsert_projection(projection, conn=tx_conn)
@@ -440,7 +440,7 @@ class StreamBridgeStore:
             ),
         )
 
-    def get_projection(self, title_id: str, provider: str) -> Optional[Projection]:
+    def get_projection(self, title_id: str, provider: str) -> Projection | None:
         conn = self._get_connection()
         row = conn.execute(
             "SELECT * FROM projections WHERE title_id = ? AND provider = ?",
@@ -448,7 +448,7 @@ class StreamBridgeStore:
         ).fetchone()
         return self._row_to_projection(row) if row else None
 
-    def list_projections(self, provider: Optional[str] = None) -> list[Projection]:
+    def list_projections(self, provider: str | None = None) -> list[Projection]:
         conn = self._get_connection()
         if provider:
             rows = conn.execute(
@@ -459,7 +459,7 @@ class StreamBridgeStore:
         return [self._row_to_projection(r) for r in rows]
 
     def delete_projection_record(
-        self, title_id: str, provider: str, conn: Optional[sqlite3.Connection] = None
+        self, title_id: str, provider: str, conn: sqlite3.Connection | None = None
     ) -> None:
         if conn is None:
             with self.transaction() as tx_conn:
@@ -470,7 +470,7 @@ class StreamBridgeStore:
             (title_id, provider),
         )
 
-    def record_snapshot(self, snapshot: Snapshot, conn: Optional[sqlite3.Connection] = None) -> None:
+    def record_snapshot(self, snapshot: Snapshot, conn: sqlite3.Connection | None = None) -> None:
         if conn is None:
             with self.transaction() as tx_conn:
                 self.record_snapshot(snapshot, conn=tx_conn)
@@ -496,7 +496,7 @@ class StreamBridgeStore:
             ),
         )
 
-    def get_latest_snapshot(self, provider: str, region: Optional[str] = None) -> Optional[Snapshot]:
+    def get_latest_snapshot(self, provider: str, region: str | None = None) -> Snapshot | None:
         conn = self._get_connection()
         if region:
             row = conn.execute(
@@ -511,7 +511,7 @@ class StreamBridgeStore:
         return self._row_to_snapshot(row) if row else None
 
     def upsert_playback_state(
-        self, state: PlaybackState, conn: Optional[sqlite3.Connection] = None
+        self, state: PlaybackState, conn: sqlite3.Connection | None = None
     ) -> None:
         if conn is None:
             with self.transaction() as tx_conn:
@@ -547,7 +547,7 @@ class StreamBridgeStore:
             ),
         )
 
-    def get_playback_state(self, title_id: str, profile: str = "default") -> Optional[PlaybackState]:
+    def get_playback_state(self, title_id: str, profile: str = "default") -> PlaybackState | None:
         conn = self._get_connection()
         row = conn.execute(
             "SELECT * FROM playback_state WHERE title_id = ? AND profile = ?",

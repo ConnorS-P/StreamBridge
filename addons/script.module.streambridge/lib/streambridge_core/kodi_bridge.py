@@ -17,7 +17,7 @@ Also integrates with the broader Kodi ecosystem:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .filters import (
     GENRE_TOGGLE_MAP,
@@ -137,8 +137,8 @@ class KodiBridge:
     def build_listitem_metadata(
         self,
         title: Title,
-        offer: Optional[Offer] = None,
-        playback_state: Optional[PlaybackState] = None,
+        offer: Offer | None = None,
+        playback_state: PlaybackState | None = None,
     ) -> dict[str, Any]:
         """Construct the Kodi 21+ `InfoTagVideo` metadata dictionary (and apply to `xbmcgui.ListItem` if in Kodi)."""
         unique_ids: dict[str, str] = {"streambridge": title.title_id}
@@ -205,7 +205,7 @@ class KodiBridge:
         except ImportError:
             return False
 
-    def get_profile_dir(self, fallback_dir: Optional[Path] = None) -> Path:
+    def get_profile_dir(self, fallback_dir: Path | None = None) -> Path:
         if IN_KODI and xbmcvfs is not None and xbmcaddon is not None:
             raw_path = xbmcvfs.translatePath(xbmcaddon.Addon(self.addon_id).getAddonInfo("profile"))
             p = Path(raw_path)

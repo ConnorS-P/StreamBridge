@@ -15,7 +15,8 @@ from dataclasses import asdict
 import json
 import socket
 import sys
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from .models import LaunchDescriptor, PlaybackSessionState, SessionEvent
 from .security import SecurityValidationError, validate_launch_url
@@ -81,7 +82,7 @@ class NamedPipeClient:
     def __init__(
         self,
         pipe_name: str = DEFAULT_PIPE_NAME,
-        tcp_fallback: Optional[tuple[str, int]] = None,
+        tcp_fallback: tuple[str, int] | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
         self.pipe_name = pipe_name

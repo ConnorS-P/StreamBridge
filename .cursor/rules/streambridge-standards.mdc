@@ -1,0 +1,21 @@
+---
+description: StreamBridge engineering, security, DRM compliance, and Kodi repository standards
+alwaysApply: true
+---
+
+# StreamBridge Project Standards & Quality Gates
+
+1. **Kodi Repository Upgrade Flow Only**:
+   - Never copy files directly into `%APPDATA%\Kodi\addons`. All Kodi add-on updates must go through version bumps (`addon.xml`), `scripts/build_kodi_repo.py`, and the `repo` branch.
+   - Every `label`, `help`, and `<heading>` in `addons/plugin.video.streambridge/resources/settings.xml` MUST be a numeric ID backed by `resources/language/resource.language.en_gb/strings.po`.
+
+2. **Security & DRM Compliance**:
+   - Never prompt for, store, log, or transmit streaming credentials or cookies.
+   - Never pass `--remote-debugging-port` or `--disable-direct-composition` to Edge/WebView2, and never attach offscreen rendering or loopback capture to protected playback.
+   - Never use `shell=True`, `eval`, or `exec`.
+
+3. **Required Code Quality Gates Before Commit**:
+   - `python -m ruff check addons scripts tests` (must pass with 0 warnings/errors)
+   - `python -m mypy` (must pass with 0 type errors)
+   - `python -m pytest` (all Gates G1–G5 + settings/repo checks must pass)
+   - `cmake --build player/build --config Release` (must compile cleanly under `/W4 /WX`)
