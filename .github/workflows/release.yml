@@ -75,11 +75,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           WORK_TMP=$(mktemp -d)
-          cp -r dist/* "$WORK_TMP/"
+          if git fetch origin repo:refs/remotes/origin/repo 2>/dev/null; then
+            git archive origin/repo | tar -x -C "$WORK_TMP"
+          fi
+          cp -rf dist/* "$WORK_TMP/"
           git checkout --orphan repo-temp
           git rm -rf .
           git clean -fdx
-          cp -r "$WORK_TMP/"* .
+          cp -rf "$WORK_TMP/"* .
           git add -f repo repository.streambridge.zip
           git commit -m "Publish Kodi repository artifacts (${GITHUB_SHA::7})"
           git push origin HEAD:refs/heads/repo --force

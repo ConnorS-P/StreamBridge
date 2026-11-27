@@ -55,9 +55,9 @@ cmake --build player/build --config Release
 .\player\build\Release\StreamBridge.Player.exe --diagnose
 ```
 
-### 3. Install in Kodi 21 (Omega)
-- **Via Kodi Repository Zip**: In Kodi, enable *Settings -> System -> Add-ons -> Unknown sources*, choose *Install from zip file*, select `dist/repository.streambridge.zip`, then install **StreamBridge** from the **StreamBridge Kodi Repository**.
-- **For Local Development**: Run `.\scripts\install_kodi_addons.ps1` to copy the add-ons and `StreamBridge.Player.exe` directly into `%APPDATA%\Kodi\addons`.
+### 3. Install & Update in Kodi 21 (Omega)
+- **Initial Repository Installation**: In Kodi, enable *Settings -> System -> Add-ons -> Unknown sources*, choose *Install from zip file*, and select `repository.streambridge.zip` (downloaded from [GitHub Releases](https://github.com/ConnorS-P/StreamBridge/releases)).
+- **Installing & Updating StreamBridge**: Go to *Add-ons -> Install from repository -> StreamBridge Kodi Repository -> Video add-ons -> StreamBridge*. To pull a newly released version immediately, open the left side-blade menu in the Add-on Browser and click **Check for updates**.
 
 ---
 
