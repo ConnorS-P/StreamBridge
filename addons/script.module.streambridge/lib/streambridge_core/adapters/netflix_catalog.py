@@ -31,7 +31,6 @@ from ..models import (
     Offer,
     SnapshotCompleteness,
     Title,
-    generate_title_id,
 )
 from ..providers import ProviderDescriptor, load_provider_descriptor
 from ..security import RedactingLogFilter, redact_secrets, validate_launch_url
@@ -440,7 +439,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
 
             if obj_type == "MOVIE":
                 title_obj = Title(
-                    title_id=generate_title_id(),
+                    title_id=f"sb_nf_movie_{nf_content_id}",
                     media_type=MediaType.MOVIE,
                     title=str(content.get("title") or "Untitled"),
                     year=int(year) if year else None,
@@ -489,7 +488,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                             ep_valid_url = validated_url
 
                         ep_title_obj = Title(
-                            title_id=generate_title_id(),
+                            title_id=f"sb_nf_ep_{nf_content_id}_s{season_num:02d}e{ep_num:02d}",
                             media_type=MediaType.EPISODE,
                             title=ep_title,
                             show_title=show_title,
@@ -526,7 +525,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
             seen_content_ids.add(cid)
             ml_url = self.descriptor.format_watch_url(cid)
             ml_title = Title(
-                title_id=generate_title_id(),
+                title_id=f"sb_nf_ml_{cid}",
                 media_type=MediaType.MOVIE,
                 title=str(ml_item.get("title") or f"Netflix #{cid}"),
                 in_my_list=True,
@@ -623,7 +622,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
             )
             raw_genres = entry.get("genre_names") or entry.get("genres") or ()
             title = Title(
-                title_id=generate_title_id(),
+                title_id=f"sb_nf_wm_{content_id}",
                 media_type=media_type,
                 title=entry.get("title", "Untitled"),
                 year=entry.get("year"),
@@ -720,7 +719,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 allowed_hosts=self.descriptor.allowed_hosts,
             )
             title = Title(
-                title_id=generate_title_id(),
+                title_id=f"sb_nf_tmdb_{content_id}",
                 media_type=MediaType.MOVIE,
                 title=entry.get("title", "Untitled"),
                 year=year,

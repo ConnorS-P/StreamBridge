@@ -192,6 +192,10 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if not is_user_initiated:
             # Guard against self-triggered scan loops
             return
+        # Guard against external filesystem watchers (e.g. service.librarywatchdog)
+        # immediately triggering UpdateLibrary right after a StreamBridge sync
+        if self.last_sync_timestamp > 0 and (time.time() - self.last_sync_timestamp) < 300.0:
+            return
 
         self._execute_sync()
 

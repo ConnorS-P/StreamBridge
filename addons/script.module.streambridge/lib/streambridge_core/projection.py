@@ -12,7 +12,6 @@ Design rules:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import re
 import time
@@ -237,13 +236,14 @@ class ProjectionEngine:
     @staticmethod
     def _atomic_write_text(target: Path, content: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-        try:
-            tmp_path.write_text(content, encoding="utf-8")
-            os.replace(tmp_path, target)
-        finally:
-            if tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass
+        if target.exists():
+            try:
+                existing = target.read_text(encoding="utf-8", errors="ignore")
+                if existing == content:
+                    return
+            except OSError:
+                pass
+        # Write directly in-place rather than os.replace(".name.tmp", target) so Windows
+        # ReadDirectoryChangesW (and Kodi's service.librarywatchdog) sees <created>/<modified>
+        # instead of a false <deleted> event that triggers CleanLibrary(video) loops.
+        target.write_text(content, encoding="utf-8")
