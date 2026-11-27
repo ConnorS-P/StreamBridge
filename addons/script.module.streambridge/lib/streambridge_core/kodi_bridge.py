@@ -379,6 +379,87 @@ class KodiBridge:
         folder_path.mkdir(parents=True, exist_ok=True)
         return self._upsert_xml_source_idempotent(xml_path, "video", source_name, folder_path)
 
+    def add_video_source_via_native_dialog(
+        self,
+        folder_path: Path,
+        source_name: str,
+        rpc_client: Any,
+    ) -> bool:
+        """Drive Kodi's native `CGUIDialogMediaSource` (`Window 10129`) so `CMediaSourceSettings::AddShare`
+        registers the source in C++ memory, saves `sources.xml`, and opens the `Set content` scraper dialog.
+        """
+        if not (IN_KODI and xbmc is not None and xbmcgui is not None):
+            return self.ensure_video_source_entry(folder_path, source_name)
+
+        folder_path.mkdir(parents=True, exist_ok=True)
+        target_path_str = str(folder_path.resolve())
+        if not target_path_str.endswith(("\\", "/")):
+            target_path_str += "\\" if "\\" in target_path_str else "/"
+
+        # Idempotency check against Kodi's live in-memory CMediaSourceSettings via Files.GetSources
+        if rpc_client is not None and rpc_client.is_video_source_loaded_in_kodi(folder_path):
+            return False
+
+        # 1. Navigate to `sources://video/` inside MyVideoNav (Window 10025)
+        if xbmcgui.getCurrentWindowId() == 10025:
+            xbmc.executebuiltin("Container.Update(sources://video/,replace)")
+        else:
+            xbmc.executebuiltin("ActivateWindow(videos,sources://video/,return)")
+
+        # Wait for `sources://video/` container to finish loading
+        for _ in range(40):
+            xbmc.sleep(100)
+            folder = xbmc.getInfoLabel("Container.FolderPath")
+            updating = xbmc.getCondVisibility("Container.IsUpdating")
+            if folder == "sources://video/" and not updating:
+                break
+
+        # 2. Move focus in the `sources://video/` list to the 'Add videos...' item (`ListItem.FolderPath == 'add'`)
+        win = xbmcgui.Window(10025)
+        focus_id = win.getFocusId() or 50
+        found_add_item = False
+        for _ in range(25):
+            cur_path = xbmc.getInfoLabel("ListItem.FolderPath")
+            if cur_path == "add":
+                found_add_item = True
+                break
+            xbmc.executebuiltin(f"Control.Move({focus_id},1)")
+            xbmc.sleep(60)
+
+        if not found_add_item:
+            # Fallback to XML registration if custom skin hid the 'Add videos...' item
+            return self.ensure_video_source_entry(folder_path, source_name)
+
+        # 3. Select 'Add videos...' to open `Window 10129` (`DialogMediaSource.xml`)
+        xbmc.executebuiltin("Action(Select)")
+        for _ in range(30):
+            xbmc.sleep(100)
+            if xbmc.getCondVisibility("Window.IsActive(mediasource)"):
+                break
+        else:
+            return self.ensure_video_source_entry(folder_path, source_name)
+
+        # 4. Click Control 10 (Path input) -> VirtualKeyboard (Window 10103) -> Input.SendText
+        xbmc.executebuiltin("SendClick(10129,10)")
+        for _ in range(25):
+            xbmc.sleep(80)
+            if xbmc.getCondVisibility("Window.IsActive(virtualkeyboard)"):
+                break
+        rpc_client.call("Input.SendText", {"text": target_path_str, "done": True})
+        xbmc.sleep(200)
+
+        # 5. Click Control 12 (Source Name edit control) -> Input.SendText
+        xbmc.executebuiltin("SendClick(10129,12)")
+        xbmc.sleep(150)
+        rpc_client.call("Input.SendText", {"text": source_name, "done": True})
+        xbmc.sleep(200)
+
+        # 6. Click Control 18 (OK button on DialogMediaSource.xml)
+        #    This executes CMediaSourceSettings::AddShare() in C++ memory, saves sources.xml,
+        #    and automatically opens the native 'Set content' (Scraper picker) dialog!
+        xbmc.executebuiltin("SendClick(10129,18)")
+        return True
+
     def load_filter_policy(self) -> LibraryFilterPolicy:
         """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""
         if not (IN_KODI and xbmcaddon is not None):

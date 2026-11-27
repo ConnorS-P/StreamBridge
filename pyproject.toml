@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "streambridge-core"
-version = "0.1.10"
+version = "0.1.11"
 description = "Kodi-native subscription streaming library integration and playback broker"
 readme = "README.md"
 license = { text = "MIT" }

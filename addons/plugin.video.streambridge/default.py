@@ -247,60 +247,51 @@ class StreamBridgePluginApp:
         media_type: str = "all",
         sources_xml_path: Path | None = None,
     ) -> list[str]:
-        """Sync catalog and register `<video>` sources in Kodi's `sources.xml`."""
+        """Sync catalog and register `<video>` sources using Kodi's native MediaSource dialog."""
         from streambridge_core.projection import format_provider_dir
 
         self.sync_provider(provider_id=provider_id)
         prov_dir = format_provider_dir(provider_id)
         base = self.export_root / "Streaming" / prov_dir
         added: list[str] = []
-        any_xml_modified = False
+
+        if IN_KODI and sources_xml_path is None:
+            if media_type in ("movies", "all"):
+                label = f"{prov_dir} (Movies)"
+                self.kodi.add_video_source_via_native_dialog(
+                    base / "Movies",
+                    source_name=label,
+                    rpc_client=self.rpc,
+                )
+                added.append(label)
+            elif media_type in ("tvshows", "tv"):
+                label = f"{prov_dir} (TV Shows)"
+                self.kodi.add_video_source_via_native_dialog(
+                    base / "TV",
+                    source_name=label,
+                    rpc_client=self.rpc,
+                )
+                added.append(label)
+            return added
 
         if media_type in ("movies", "all"):
             label = f"{prov_dir} (Movies)"
-            movies_dir = base / "Movies"
-            if self.kodi.ensure_video_source_entry(
-                movies_dir,
+            self.kodi.ensure_video_source_entry(
+                base / "Movies",
                 source_name=label,
                 sources_xml_path=sources_xml_path,
-            ):
-                any_xml_modified = True
+            )
             added.append(label)
 
         if media_type in ("tvshows", "tv", "all"):
             label = f"{prov_dir} (TV Shows)"
-            tv_dir = base / "TV"
-            if self.kodi.ensure_video_source_entry(
-                tv_dir,
+            self.kodi.ensure_video_source_entry(
+                base / "TV",
                 source_name=label,
                 sources_xml_path=sources_xml_path,
-            ):
-                any_xml_modified = True
+            )
             added.append(label)
 
-        # 1. Navigate out of `plugin://plugin.video.streambridge/` to `sources://video/` FIRST
-        #    so Kodi's MyVideoNav window is no longer pointing at a plugin:// URL during profile reload.
-        if IN_KODI:
-            import xbmc  # type: ignore[import-not-found]
-            import xbmcgui  # type: ignore[import-not-found]
-
-            if xbmcgui.getCurrentWindowId() == 10025:
-                self.kodi.execute_builtin("Container.Update(sources://video/,replace)")
-            else:
-                self.kodi.execute_builtin("ActivateWindow(videos,sources://video/,return)")
-
-            # 2. If sources.xml was modified on disk, call Profiles.LoadProfile ONCE (never twice!)
-            #    after a brief pause for Container.Update to leave the plugin directory, then refresh.
-            if any_xml_modified:
-                xbmc.sleep(250)
-                self.rpc.reload_current_profile()
-                xbmc.sleep(250)
-                self.kodi.execute_builtin("Container.Refresh")
-
-        self.kodi.notify(
-            "StreamBridge Sources Added",
-            f"Added {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
-        )
         return added
 
     def launch_provider_login(self, provider_id: str = "netflix") -> bool:
