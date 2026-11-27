@@ -225,12 +225,14 @@ class StreamBridgePluginApp:
         title_id: str,
         profile: str = "default",
         preferred_backend: str = "auto",
+        wait_for_exit: bool = True,
     ) -> PlaybackSessionResult:
         return self.broker.play_title(
             adapter=self.adapter,
             title_id=title_id,
             profile=profile,
             preferred_backend=preferred_backend,
+            wait_for_exit=wait_for_exit,
         )
 
     def clear_auth_session(self, base_dir: Path | None = None) -> bool:
@@ -523,17 +525,24 @@ def browse_provider_filtered(provider_id: str, media_filter: str) -> list[dict[s
 @plugin.route("/play/<title_id>")
 def play_route(title_id: str) -> PlaybackSessionResult:
     app = get_app()
-    result = app.play(title_id=title_id)
-    if IN_KODI and plugin.handle >= 0:
+    in_kodi_player = bool(IN_KODI and plugin.handle >= 0)
+    result = app.play(title_id=title_id, wait_for_exit=not in_kodi_player)
+    if in_kodi_player:
         import xbmcgui  # type: ignore[import-not-found]
         import xbmcplugin  # type: ignore[import-not-found]
         from streambridge_core.osd_overlay import generate_chroma_key_avi
 
-        proxy_avi = generate_chroma_key_avi(
-            app.kodi.get_profile_dir() / "osd_proxy_key.avi",
-            duration_seconds=1,
-        )
-        li = xbmcgui.ListItem(path=str(proxy_avi))
+        proxy_path = app.kodi.get_profile_dir() / "osd_proxy_key.avi"
+        if not proxy_path.exists():
+            generate_chroma_key_avi(proxy_path, duration_seconds=7200)
+        title_obj = app.store.get_title(title_id)
+        if title_obj is not None:
+            offers = app.store.get_offers_for_title(title_id, provider="netflix")
+            meta = app.kodi.build_listitem_metadata(title_obj, offer=offers[0] if offers else None)
+            li = meta.get("listitem") or xbmcgui.ListItem(path=str(proxy_path))
+            li.setPath(str(proxy_path))
+        else:
+            li = xbmcgui.ListItem(path=str(proxy_path))
         xbmcplugin.setResolvedUrl(plugin.handle, True, li)
     return result
 

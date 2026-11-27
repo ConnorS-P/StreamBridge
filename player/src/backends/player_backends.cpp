@@ -101,7 +101,16 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
 
     const style = document.createElement('style');
     style.textContent = `
-        body { overflow: hidden !important; background-color: #000 !important; }
+        .watch-video--bottom-controls-container,
+        .watch-video--back-container,
+        .watch-video--flag-container,
+        .evidence-overlay,
+        .PlayerControlsNeo__layout,
+        .nf-player-container .controls {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+        body { cursor: none !important; overflow: hidden !important; background-color: #000 !important; }
     `;
     if (document.head) {
         document.head.appendChild(style);
@@ -114,12 +123,23 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
     window.__streambridgeControl = function(action, value) {
         const v = document.querySelector('video');
         if (!v) return;
-        if (action === 'pause') v.pause();
-        else if (action === 'resume' || action === 'play') v.play();
-        else if (action === 'seek' && typeof value === 'number') v.currentTime = value;
+        if (action === 'pause') {
+            window.__sbUserPaused = true;
+            v.pause();
+        } else if (action === 'resume' || action === 'play') {
+            window.__sbUserPaused = false;
+            v.play();
+        } else if (action === 'seek' && typeof value === 'number') {
+            v.currentTime = value;
+        }
     };
 
     function postTelemetry(stateOverride) {
+        const profileLink = document.querySelector('a.profile-link, [data-uia="action-select-profile+primary"]');
+        if (profileLink && !window.__sbProfileClicked) {
+            window.__sbProfileClicked = true;
+            profileLink.click();
+        }
         const v = document.querySelector('video');
         if (!v || !window.chrome || !window.chrome.webview) return;
         let state = stateOverride;
@@ -269,6 +289,49 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         case WM_SIZE:
             ResizeWebViewBounds(ctx);
             return 0;
+        case WM_TIMER:
+            if (wparam == 1 && ctx && !ctx->is_login_session) {
+                if (!ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) {
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                    return 0;
+                }
+                RECT kodi_screen = {};
+                if (GetWindowRect(ctx->kodi_hwnd, &kodi_screen)) {
+                    int kw = kodi_screen.right - kodi_screen.left;
+                    int kh = kodi_screen.bottom - kodi_screen.top;
+                    EnableKodiChromaKeyCutout(ctx->kodi_hwnd);
+                    SetWindowPos(
+                        hwnd,
+                        ctx->kodi_hwnd,
+                        kodi_screen.left,
+                        kodi_screen.top,
+                        kw,
+                        kh,
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                }
+            }
+            return 0;
+        case WM_APP + 1:
+            if (ctx && ctx->webview) {
+                ctx->webview->ExecuteScript(
+                    L"if(window.__streambridgeControl) window.__streambridgeControl('pause', 0);",
+                    nullptr);
+            }
+            return 0;
+        case WM_APP + 2:
+            if (ctx && ctx->webview) {
+                ctx->webview->ExecuteScript(
+                    L"if(window.__streambridgeControl) window.__streambridgeControl('resume', 0);",
+                    nullptr);
+            }
+            return 0;
+        case WM_APP + 3:
+            if (ctx && ctx->webview) {
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek', " +
+                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE || wparam == VK_BROWSER_BACK || wparam == VK_MEDIA_STOP) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -276,6 +339,11 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             }
             break;
         case WM_CLOSE:
+            KillTimer(hwnd, 1);
+            if (ctx && ctx->kodi_layered_applied && ctx->kodi_hwnd) {
+                DisableKodiChromaKeyCutout(ctx->kodi_hwnd);
+                ctx->kodi_layered_applied = false;
+            }
             if (ctx && ctx->controller) {
                 ctx->controller->Close();
                 ctx->controller.Reset();
@@ -348,6 +416,13 @@ bool RunInteractiveWebView2Window(
     HINSTANCE hinst = GetModuleHandleW(nullptr);
     const wchar_t* kClassName = L"StreamBridgeWebViewHostClass";
 
+    if (!is_login_session) {
+        HWND prev_hwnd = FindWindowW(kClassName, L"StreamBridge Surface");
+        if (prev_hwnd && IsWindow(prev_hwnd)) {
+            SendMessageW(prev_hwnd, WM_CLOSE, 0, 0);
+        }
+    }
+
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -380,8 +455,8 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd at Kodi's exact monitor rect
-            // so Windows DWM renders the PlayReady surface directly over Kodi's window with independent input focus.
+            // Playback Mode (Option B): Place chromeless surface on Kodi's monitor directly
+            // underneath Kodi's DWM chroma-keyed HWND so Kodi's native skin OSD ('M' menu) renders on top!
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -389,7 +464,9 @@ bool RunInteractiveWebView2Window(
             win_w = kodi_screen.right - kodi_screen.left;
             win_h = kodi_screen.bottom - kodi_screen.top;
             win_style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN;
-            parent_hwnd = ctx.kodi_hwnd;
+            ex_style = WS_EX_NOACTIVATE;
+            EnableKodiChromaKeyCutout(ctx.kodi_hwnd);
+            ctx.kodi_layered_applied = true;
         }
     }
 
@@ -408,17 +485,27 @@ bool RunInteractiveWebView2Window(
         &ctx);
 
     if (!hwnd) {
+        if (ctx.kodi_layered_applied) {
+            DisableKodiChromaKeyCutout(ctx.kodi_hwnd);
+        }
         if (uninit_com) CoUninitialize();
         if (out_error) *out_error = "CreateWindowExW failed";
         return false;
     }
     ctx.main_hwnd = hwnd;
 
-    ShowCursor(TRUE);
-    ShowWindow(hwnd, SW_SHOW);
-    SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_SHOWWINDOW);
-    SetForegroundWindow(hwnd);
-    SetFocus(hwnd);
+    if (!is_login_session && ctx.kodi_hwnd) {
+        // Place the video underlay directly behind kodi_hwnd in Z-order and keep Kodi focused
+        SetWindowPos(hwnd, ctx.kodi_hwnd, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetForegroundWindow(ctx.kodi_hwnd);
+        SetTimer(hwnd, 1, 400, nullptr);
+    } else {
+        ShowCursor(TRUE);
+        ShowWindow(hwnd, SW_SHOW);
+        SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_SHOWWINDOW);
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
+    }
 
     std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
     if (ctx.on_state_change) {
@@ -448,7 +535,9 @@ bool RunInteractiveWebView2Window(
 
                             ResizeWebViewBounds(&ctx);
                             controller->put_IsVisible(TRUE);
-                            controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+                            if (ctx.is_login_session) {
+                                controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+                            }
 
                             // Intercept ESC, Browser Back, Media Stop (and Backspace in playback mode)
                             EventRegistrationToken accel_token = {};

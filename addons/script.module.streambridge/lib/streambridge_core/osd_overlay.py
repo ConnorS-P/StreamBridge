@@ -176,3 +176,27 @@ def disable_kodi_osd_cutout(overlay_dll_path: Path | None = None) -> bool:
         user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED)
         user32.RedrawWindow(hwnd, None, None, 0x0001 | 0x0004 | 0x0400 | 0x0080)
     return True
+
+
+def send_player_control(action: str, value_seconds: int = 0) -> bool:
+    """Forward Kodi OSD player actions (`pause`, `resume`, `seek`, `stop`) to `StreamBridge.Player.exe`."""
+    if sys.platform != "win32":
+        return False
+
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW("StreamBridgeWebViewHostClass", "StreamBridge Surface")
+    if not hwnd:
+        return False
+
+    WM_CLOSE = 0x0010
+    WM_APP = 0x8000
+    act = action.lower()
+    if act == "pause":
+        return bool(user32.PostMessageW(hwnd, WM_APP + 1, 0, 0))
+    if act in ("resume", "play"):
+        return bool(user32.PostMessageW(hwnd, WM_APP + 2, 0, 0))
+    if act == "seek":
+        return bool(user32.PostMessageW(hwnd, WM_APP + 3, max(0, int(value_seconds)), 0))
+    if act in ("stop", "ended", "close"):
+        return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
+    return False

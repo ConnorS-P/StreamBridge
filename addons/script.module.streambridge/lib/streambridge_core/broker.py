@@ -28,7 +28,11 @@ from .models import (
     PlaybackState,
     SessionEvent,
 )
-from .osd_overlay import generate_chroma_key_avi
+from .osd_overlay import (
+    disable_kodi_osd_cutout,
+    enable_kodi_osd_cutout,
+    generate_chroma_key_avi,
+)
 from .platform_compat import (
     PlatformEnvironment,
     build_non_windows_fallback_plan,
@@ -80,6 +84,7 @@ class PlaybackBroker:
         profile: str = "default",
         preferred_backend: str = "auto",
         platform_override: str | None = None,
+        wait_for_exit: bool = True,
     ) -> PlaybackSessionResult:
         """Resolve `title_id` and execute a complete playback session lifecycle."""
         descriptor = adapter.resolve_offer(
@@ -115,7 +120,8 @@ class PlaybackBroker:
 
         # Capture Kodi state, set Window(10000) Trakt/TMDb Helper properties, and release audio
         self.kodi.set_ecosystem_window_properties(descriptor)
-        self.kodi.release_kodi_audio_device()
+        if wait_for_exit:
+            self.kodi.release_kodi_audio_device()
 
         try:
             if self.ipc_client is not None and (env.is_windows or self.ipc_client.tcp_fallback is not None):
@@ -124,11 +130,14 @@ class PlaybackBroker:
             if env.has_native_companion_exe and env.companion_exe_path is not None:
                 import subprocess
 
-                proxy_avi = generate_chroma_key_avi(
-                    self.kodi.get_profile_dir() / "osd_proxy_key.avi",
-                    duration_seconds=1,
-                )
+                proxy_path = self.kodi.get_profile_dir() / "osd_proxy_key.avi"
+                target_dur = 7200 if not wait_for_exit else 120
+                if not proxy_path.exists() or proxy_path.stat().st_size < (target_dur * 500):
+                    proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=target_dur)
+                else:
+                    proxy_avi = proxy_path
                 self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
+                enable_kodi_osd_cutout()
                 no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0
                 proc = subprocess.Popen(
                     [str(env.companion_exe_path), "--watch", descriptor.launch_url],
@@ -136,7 +145,11 @@ class PlaybackBroker:
                     close_fds=True,
                     creationflags=no_win_flag,
                 )
-                proc.wait()
+                if wait_for_exit:
+                    try:
+                        proc.wait()
+                    finally:
+                        disable_kodi_osd_cutout()
                 events = make_unverified_browser_events(descriptor, backend_name="webview2_native_host")
                 return PlaybackSessionResult(
                     session_id=descriptor.session_id,
@@ -150,8 +163,9 @@ class PlaybackBroker:
 
             return self._run_fallback_session(descriptor, env=env, profile=profile)
         finally:
-            self.kodi.restore_kodi_audio_and_focus()
-            self.kodi.clear_ecosystem_window_properties()
+            if wait_for_exit:
+                self.kodi.restore_kodi_audio_and_focus()
+                self.kodi.clear_ecosystem_window_properties()
 
     def _run_ipc_session(
         self, descriptor: LaunchDescriptor, profile: str = "default"

@@ -18,7 +18,7 @@ from streambridge_core.adapters.netflix_catalog import NetflixCatalogAdapter
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
-from streambridge_core.osd_overlay import disable_kodi_osd_cutout
+from streambridge_core.osd_overlay import disable_kodi_osd_cutout, send_player_control
 from streambridge_core.projection import ProjectionEngine
 from streambridge_core.reconciler import ReconciliationEngine, ReconciliationResult
 
@@ -51,21 +51,28 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
 
     def onPlayBackPaused(self) -> None:
         self.last_action = "pause"
+        send_player_control("pause")
 
     def onPlayBackResumed(self) -> None:
         self.last_action = "resume"
+        send_player_control("resume")
 
     def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
         self.last_action = "seek"
         self.last_seek_seconds = float(time_ms) / 1000.0
+        send_player_control("seek", int(self.last_seek_seconds))
 
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
+        send_player_control("stop")
         disable_kodi_osd_cutout()
+        self.kodi.clear_ecosystem_window_properties()
 
     def onPlayBackEnded(self) -> None:
         self.last_action = "ended"
+        send_player_control("stop")
         disable_kodi_osd_cutout()
+        self.kodi.clear_ecosystem_window_properties()
 
 
 class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
