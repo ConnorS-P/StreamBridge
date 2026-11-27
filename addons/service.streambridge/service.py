@@ -52,7 +52,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):
         profile_dir = self.kodi.get_profile_dir()
         self.store = store or StreamBridgeStore(profile_dir / "streambridge.db")
         self.export_root = export_root or (profile_dir / "library")
-        self.projection = ProjectionEngine(self.export_root, write_nfo=True)
+        self.projection = ProjectionEngine(self.export_root, write_nfo=False)
         self.reconciler = ReconciliationEngine(self.store, self.projection)
         default_fixture = (
             Path(__file__).resolve().parents[1]

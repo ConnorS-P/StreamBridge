@@ -51,7 +51,7 @@ class ProjectionEngine:
     def __init__(
         self,
         export_root: Path | str,
-        write_nfo: bool = True,
+        write_nfo: bool = False,
         export_unaired: bool = False,
     ) -> None:
         self.export_root = Path(export_root)

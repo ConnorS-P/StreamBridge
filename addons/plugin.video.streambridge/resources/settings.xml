@@ -14,8 +14,8 @@
                     </control>
                 </setting>
                 <setting id="write_nfo" type="boolean" label="30103" help="30104">
-                    <level>0</level>
-                    <default>true</default>
+                    <level>1</level>
+                    <default>false</default>
                     <control type="toggle"/>
                 </setting>
                 <setting id="export_unaired" type="boolean" label="30105" help="30106">
@@ -44,7 +44,6 @@
                         <options>
                             <option label="30204">fixture</option>
                             <option label="30205">watchmode</option>
-                            <option label="30206">tmdb</option>
                         </options>
                     </constraints>
                     <control type="spinner" format="string"/>
@@ -64,17 +63,6 @@
                     </constraints>
                     <control type="edit" format="string">
                         <heading>30209</heading>
-                        <hidden>true</hidden>
-                    </control>
-                </setting>
-                <setting id="tmdb_api_key" type="string" label="30211" help="30212">
-                    <level>0</level>
-                    <default/>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30211</heading>
                         <hidden>true</hidden>
                     </control>
                 </setting>
