@@ -68,6 +68,7 @@ class Title:
     content_rating: str | None = None
     user_rating: float | None = None
     genres: tuple[str, ...] = ()
+    in_my_list: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 

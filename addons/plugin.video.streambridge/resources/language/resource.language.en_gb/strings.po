@@ -74,6 +74,10 @@ msgctxt "#30017"
 msgid "Allowed Genres & Formats"
 msgstr ""
 
+msgctxt "#30018"
+msgid "Netflix 'My List' Integration"
+msgstr ""
+
 # General & Library Export Settings (30100 - 30119)
 msgctxt "#30100"
 msgid "Streaming Library Export Root"
@@ -157,7 +161,11 @@ msgid "Bundled Sample Fixture Catalog"
 msgstr ""
 
 msgctxt "#30205"
-msgid "Watchmode API"
+msgid "Watchmode API (Optional)"
+msgstr ""
+
+msgctxt "#30206"
+msgid "Live Netflix Regional Catalog (No API Key Required)"
 msgstr ""
 
 msgctxt "#30207"
@@ -226,6 +234,38 @@ msgstr ""
 
 msgctxt "#30232"
 msgid "Sweden (SE)"
+msgstr ""
+
+msgctxt "#30240"
+msgid "Sync 'My List' titles to Kodi Favourites"
+msgstr ""
+
+msgctxt "#30241"
+msgid "Automatically adds your Netflix 'My List' titles to Kodi's native Favourites menu."
+msgstr ""
+
+msgctxt "#30242"
+msgid "Tag 'My List' items in Kodi Library ('Netflix My List')"
+msgstr ""
+
+msgctxt "#30243"
+msgid "Applies the 'Netflix My List' tag to matching library items for skin widgets and library filtering."
+msgstr ""
+
+msgctxt "#30244"
+msgid "Always include 'My List' titles (bypass genre/rating/score filters)"
+msgstr ""
+
+msgctxt "#30245"
+msgid "Ensures any title you manually added to 'My List' is exported even if a filter would have excluded it."
+msgstr ""
+
+msgctxt "#30246"
+msgid "Only export titles from my Netflix 'My List'"
+msgstr ""
+
+msgctxt "#30247"
+msgid "When enabled, only titles in your Netflix 'My List' are exported to your Kodi library."
 msgstr ""
 
 # Playback & Security Settings (30300 - 30329)

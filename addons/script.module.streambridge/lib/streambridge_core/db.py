@@ -29,7 +29,7 @@ from .models import (
     Title,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS titles (
     content_rating TEXT,
     user_rating REAL,
     genres_json TEXT NOT NULL DEFAULT '[]',
+    in_my_list INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -192,6 +193,7 @@ class StreamBridgeStore:
                 ("content_rating", "ALTER TABLE titles ADD COLUMN content_rating TEXT"),
                 ("user_rating", "ALTER TABLE titles ADD COLUMN user_rating REAL"),
                 ("genres_json", "ALTER TABLE titles ADD COLUMN genres_json TEXT NOT NULL DEFAULT '[]'"),
+                ("in_my_list", "ALTER TABLE titles ADD COLUMN in_my_list INTEGER NOT NULL DEFAULT 0"),
             ]
             for col_name, ddl in migrations:
                 if col_name not in existing_cols:
@@ -246,6 +248,7 @@ class StreamBridgeStore:
                     content_rating = COALESCE(?, content_rating),
                     user_rating = COALESCE(?, user_rating),
                     genres_json = ?,
+                    in_my_list = ?,
                     updated_at = ?
                 WHERE title_id = ?
                 """,
@@ -269,6 +272,7 @@ class StreamBridgeStore:
                     title.content_rating,
                     title.user_rating,
                     genres_json,
+                    1 if title.in_my_list else 0,
                     now,
                     title.title_id,
                 ),
@@ -280,8 +284,8 @@ class StreamBridgeStore:
                     title_id, canonical_key, media_type, title, year,
                     tmdb_id, imdb_id, parent_show_id, show_title, season, episode,
                     edition, premiered, plot, is_aired, original_language, is_dubbed,
-                    content_rating, user_rating, genres_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    content_rating, user_rating, genres_json, in_my_list, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title.title_id,
@@ -304,6 +308,7 @@ class StreamBridgeStore:
                     title.content_rating,
                     title.user_rating,
                     genres_json,
+                    1 if title.in_my_list else 0,
                     title.created_at,
                     now,
                 ),
@@ -582,6 +587,7 @@ class StreamBridgeStore:
             content_rating=row["content_rating"] if "content_rating" in row.keys() else None,
             user_rating=float(row["user_rating"]) if "user_rating" in row.keys() and row["user_rating"] is not None else None,
             genres=genres,
+            in_my_list=bool(row["in_my_list"]) if "in_my_list" in row.keys() else False,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

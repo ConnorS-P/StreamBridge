@@ -135,7 +135,24 @@ class StreamBridgePluginApp:
         )
         bundled_player = Path(__file__).resolve().parent / "bin" / "StreamBridge.Player.exe"
         self.companion_exe_path = bundled_player if bundled_player.exists() else None
-        self.adapter = adapter or FixtureAdapter(self.store, fixture_path=default_fixture)
+        if adapter is not None:
+            self.adapter = adapter
+        elif IN_KODI:
+            import xbmcaddon  # type: ignore[import-not-found]
+
+            addon_inst = xbmcaddon.Addon("plugin.video.streambridge")
+            cat_mode = addon_inst.getSettingString("netflix_catalog_mode") or "live_justwatch"
+            wm_key = addon_inst.getSettingString("watchmode_api_key") or None
+            if cat_mode == "fixture":
+                self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
+            else:
+                self.adapter = NetflixCatalogAdapter(
+                    store=self.store,
+                    watchmode_api_key=wm_key,
+                    companion_exe_path=self.companion_exe_path,
+                )
+        else:
+            self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
         self.broker = broker or PlaybackBroker(
             store=self.store,
             kodi_bridge=self.kodi,
@@ -145,17 +162,18 @@ class StreamBridgePluginApp:
 
     def build_adapter(
         self,
-        mode: str = "fixture",
+        mode: str = "live_justwatch",
         watchmode_api_key: str | None = None,
         tmdb_api_key: str | None = None,
     ) -> ProviderAdapter:
-        if mode in ("watchmode", "tmdb") and (watchmode_api_key or tmdb_api_key):
-            return NetflixCatalogAdapter(
-                store=self.store,
-                watchmode_api_key=watchmode_api_key,
-                tmdb_api_key=tmdb_api_key,
-            )
-        return self.adapter
+        if mode == "fixture":
+            return self.adapter
+        return NetflixCatalogAdapter(
+            store=self.store,
+            watchmode_api_key=watchmode_api_key,
+            tmdb_api_key=tmdb_api_key,
+            companion_exe_path=self.companion_exe_path,
+        )
 
     def list_provider_titles(
         self, provider_id: str = "netflix", media_filter: str | None = None
@@ -175,11 +193,23 @@ class StreamBridgePluginApp:
             entries.append(meta)
         return entries
 
-    def sync_provider(self, provider_id: str = "netflix", region: str = "US") -> ReconciliationResult:
+    def sync_provider(
+        self,
+        provider_id: str = "netflix",
+        region: str = "US",
+        sync_favourites: bool = True,
+    ) -> ReconciliationResult:
         policy = self.kodi.load_filter_policy()
         res = self.reconciler.reconcile_provider(
             self.adapter, region=region, filter_policy=policy
         )
+        if sync_favourites:
+            mylist_titles = [
+                t for t in self.store.list_titles(provider=provider_id, available_only=True)
+                if t.in_my_list
+            ]
+            if mylist_titles:
+                self.rpc.sync_mylist_to_kodi_favourites(mylist_titles)
         if res.requires_kodi_scan:
             self.rpc.request_targeted_scan()
         if res.requires_kodi_clean:
@@ -243,11 +273,16 @@ class StreamBridgePluginApp:
             )
             added.append(label)
 
+        # Force Kodi's CMediaSourceSettings::GetInstance().Load() to reload sources.xml into memory
+        # before navigating to the Video Sources window so the new sources appear visually right away.
+        profile_label = self.rpc.reload_current_profile()
+        self.kodi.execute_builtin(f"LoadProfile({profile_label})")
+        self.kodi.execute_builtin('ActivateWindow(videos,"sources://video/",return)')
+        self.kodi.execute_builtin("Container.Refresh")
         self.kodi.notify(
             "StreamBridge Sources Added",
-            f"Registered {', '.join(added)} in Video Sources. Press C -> Set content to choose your scraper.",
+            f"Added {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
         )
-        self.kodi.execute_builtin("ActivateWindow(videos,sources://video/,return)")
         return added
 
     def launch_provider_login(self, provider_id: str = "netflix") -> bool:

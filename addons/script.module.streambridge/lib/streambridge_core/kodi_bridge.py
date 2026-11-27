@@ -389,6 +389,8 @@ class KodiBridge:
                 "rating_unrated": addon.getSettingBool("rating_unrated"),
                 "min_user_rating": addon.getSettingNumber("min_user_rating"),
                 "min_release_year": addon.getSettingInt("min_release_year"),
+                "mylist_only": addon.getSettingBool("mylist_only"),
+                "mylist_bypass_filters": addon.getSettingBool("mylist_bypass_filters"),
             }
             for lang_key in LANGUAGE_TOGGLE_MAP:
                 settings_dict[lang_key] = addon.getSettingBool(lang_key)

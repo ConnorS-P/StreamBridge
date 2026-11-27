@@ -157,6 +157,122 @@ def test_watchmode_and_tmdb_catalog_adapters(tmp_path: Path) -> None:
     assert batch_tmdb.next_cursor == "2"
     assert len(batch_tmdb.items) == 1
     assert batch_tmdb.items[0].title.year == 2018
+
+    # 3. Zero-API-key JustWatch GraphQL response (Movies + Shows + Seasons/Episodes + My List)
+    jw_resp = MagicMock()
+    jw_resp.status_code = 200
+    jw_resp.json.return_value = {
+        "data": {
+            "popularTitles": {
+                "edges": [
+                    {
+                        "node": {
+                            "objectId": 1001,
+                            "objectType": "MOVIE",
+                            "content": {
+                                "title": "Rebel Ridge",
+                                "originalReleaseYear": 2024,
+                                "ageCertification": "R",
+                                "shortDescription": "An ex-Marine grapples his way through a web of small-town corruption.",
+                                "productionCountries": ["US"],
+                                "externalIds": {"imdbId": "tt11301886", "tmdbId": "646097"},
+                                "scoring": {"imdbScore": 6.8},
+                                "genres": [{"shortName": "act"}, {"shortName": "trl"}],
+                            },
+                            "watchNowOffer": {
+                                "standardWebURL": "https://www.netflix.com/title/81157729"
+                            },
+                        }
+                    },
+                    {
+                        "node": {
+                            "objectId": 2002,
+                            "objectType": "SHOW",
+                            "content": {
+                                "title": "Dark",
+                                "originalReleaseYear": 2017,
+                                "ageCertification": "TV-MA",
+                                "shortDescription": "A missing child sets four families on a frantic hunt for answers.",
+                                "productionCountries": ["DE"],
+                                "externalIds": {"imdbId": "tt5753856", "tmdbId": "70523"},
+                                "scoring": {"imdbScore": 8.7},
+                                "genres": [{"shortName": "drm"}, {"shortName": "scf"}],
+                            },
+                            "watchNowOffer": {
+                                "standardWebURL": "https://www.netflix.com/title/80100172"
+                            },
+                            "seasons": [
+                                {
+                                    "content": {"seasonNumber": 1},
+                                    "episodes": [
+                                        {
+                                            "content": {"title": "Secrets", "episodeNumber": 1},
+                                            "watchNowOffer": {
+                                                "standardWebURL": "https://www.netflix.com/watch/80114790"
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    },
+                ]
+            }
+        }
+    }
+    mock_session.post.return_value = jw_resp
+
+    jw_adapter = NetflixCatalogAdapter(
+        store=store,
+        session=mock_session,
+        my_list_content_ids={"80100172"},
+    )
+    batch_jw = jw_adapter.refresh_catalog(region="US")
+    assert batch_jw.completeness == SnapshotCompleteness.COMPLETE
+    assert len(batch_jw.items) == 2
+    movie_item = batch_jw.items[0]
+    ep_item = batch_jw.items[1]
+    assert movie_item.title.title == "Rebel Ridge"
+    assert movie_item.title.original_language == "en"
+    assert movie_item.title.is_dubbed is False
+    assert movie_item.title.in_my_list is False
+    assert ep_item.title.show_title == "Dark"
+    assert ep_item.title.original_language == "de"
+    assert ep_item.title.is_dubbed is True
+    assert ep_item.title.in_my_list is True
+
+    # Verify My List filter bypass & My List Only filter rules + Kodi Favourites & Tag RPC
+    from streambridge_core.filters import LibraryFilterPolicy, evaluate_title_filter
+    from streambridge_core.kodi_rpc import KodiJsonRpcClient
+
+    # Even though 'Dark' is German/dubbed, `mylist_bypass_filters=True` allows it because `in_my_list=True`!
+    strict_en_policy = LibraryFilterPolicy(
+        allowed_original_languages=("en",),
+        allow_dubbed_content=False,
+        mylist_bypass_filters=True,
+        mylist_only=False,
+    )
+    assert evaluate_title_filter(ep_item.title, strict_en_policy).allowed is True
+
+    mylist_only_policy = LibraryFilterPolicy(mylist_only=True)
+    assert evaluate_title_filter(movie_item.title, mylist_only_policy).allowed is False
+    assert evaluate_title_filter(ep_item.title, mylist_only_policy).allowed is True
+
+    rpc_calls: list[dict[str, object]] = []
+    rpc = KodiJsonRpcClient(
+        rpc_Transport=lambda s: (rpc_calls.append(json.loads(s)) or '{"jsonrpc":"2.0","id":1,"result":"OK"}')
+    )
+    assert rpc.sync_mylist_to_kodi_favourites([movie_item.title, ep_item.title]) == 1
+    assert any(c.get("method") == "Favourites.AddFavourite" for c in rpc_calls)
+    assert rpc.apply_mylist_tag_to_kodi_item(
+        movie_item.title.__class__(
+            title_id="sb_ml_1",
+            media_type=movie_item.title.media_type,
+            title="My List Movie",
+            in_my_list=True,
+        ),
+        kodi_db_id=99,
+    ) is True
     store.close()
 
 

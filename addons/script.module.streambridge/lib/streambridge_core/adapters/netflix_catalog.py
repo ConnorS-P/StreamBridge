@@ -1,12 +1,22 @@
-"""Licensed Catalog Adapter for Netflix using Watchmode API + TMDB Watch Providers.
+"""Zero-API-Key Live Netflix Catalog Adapter (JustWatch Public GraphQL + WebView2 My List + Watchmode/TMDB).
 
-Uses `requests.Session` (provided by `script.module.requests` in Kodi) with timeouts,
-redactable API key handling, and fallback to local fixture/curated JSON if no API key is set.
+Default mode (`refresh_catalog`) uses JustWatch's public GraphQL endpoint (`https://apis.justwatch.com/graphql`)
+which requires ZERO API keys and returns regional Netflix Movies, TV Shows (with Seasons and Episodes),
+canonical TMDB/IMDb IDs, age ratings, IMDb scores, genres, production countries (mapped to original
+language and dubbing status), and verified `https://www.netflix.com/title/<id>` launch URLs.
+
+Also merges the user's personal Netflix "My List" items extracted via `StreamBridge.Player.exe --export-mylist`.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
 import time
 from typing import Any
 import uuid
@@ -36,9 +46,135 @@ from .base import (
 logger = logging.getLogger("streambridge.netflix_catalog")
 logger.addFilter(RedactingLogFilter())
 
+JUSTWATCH_GRAPHQL_URL = "https://apis.justwatch.com/graphql"
+
+# Map JustWatch 3-letter genre shortNames to canonical StreamBridge genre names
+_JW_GENRE_MAP: dict[str, str] = {
+    "act": "Action",
+    "ani": "Animation",
+    "cmy": "Comedy",
+    "crm": "Crime",
+    "doc": "Documentary",
+    "drm": "Drama",
+    "fml": "Family",
+    "fnt": "Fantasy",
+    "hst": "History",
+    "hrr": "Horror",
+    "msc": "Musical",
+    "trl": "Thriller",
+    "rly": "Reality",
+    "rma": "Romance",
+    "scf": "Sci-Fi",
+    "spt": "Sports",
+    "war": "War",
+    "wsn": "Western",
+}
+
+# Map primary ISO-3166-1 production country codes to ISO-639-1 original languages
+_COUNTRY_TO_LANG: dict[str, str] = {
+    "US": "en",
+    "GB": "en",
+    "CA": "en",
+    "AU": "en",
+    "NZ": "en",
+    "IE": "en",
+    "JP": "ja",
+    "KR": "ko",
+    "ES": "es",
+    "MX": "es",
+    "AR": "es",
+    "CO": "es",
+    "CL": "es",
+    "FR": "fr",
+    "BE": "fr",
+    "DE": "de",
+    "AT": "de",
+    "IT": "it",
+    "BR": "pt",
+    "PT": "pt",
+    "CN": "zh",
+    "TW": "zh",
+    "HK": "zh",
+    "IN": "hi",
+    "TR": "tr",
+    "PL": "pl",
+    "SE": "sv",
+    "DK": "da",
+    "NO": "no",
+    "FI": "fi",
+    "IS": "is",
+}
+
+_NETFLIX_ID_RE = re.compile(r"/(?:title|watch)/(\d+)")
+
+_JUSTWATCH_NETFLIX_QUERY = """
+query GetPopularNetflixTitles($country: Country!, $first: Int!) {
+  popularTitles(country: $country, first: $first, filter: {packages: ["nfx"]}) {
+    edges {
+      node {
+        objectId
+        objectType
+        content(country: $country, language: "en") {
+          title
+          originalReleaseYear
+          ageCertification
+          shortDescription
+          productionCountries
+          externalIds {
+            imdbId
+            tmdbId
+          }
+          scoring {
+            imdbScore
+          }
+          genres {
+            shortName
+          }
+        }
+        watchNowOffer(country: $country, platform: WEB) {
+          standardWebURL
+        }
+        ... on Show {
+          seasons {
+            content(country: $country, language: "en") {
+              seasonNumber
+            }
+            episodes {
+              content(country: $country, language: "en") {
+                title
+                episodeNumber
+              }
+              watchNowOffer(country: $country, platform: WEB) {
+                standardWebURL
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _extract_netflix_id(url: str, fallback: str) -> str:
+    m = _NETFLIX_ID_RE.search(url or "")
+    return m.group(1) if m else fallback
+
+
+def _infer_language_from_countries(countries: list[str] | tuple[str, ...]) -> str:
+    if not countries:
+        return "en"
+    for country in countries:
+        c_up = str(country).strip().upper()
+        if c_up in ("US", "GB", "AU", "NZ", "IE"):
+            return "en"
+    first = str(countries[0]).strip().upper()
+    return _COUNTRY_TO_LANG.get(first, "other")
+
 
 class NetflixCatalogAdapter(ProviderAdapter):
-    """Ingests Netflix availability and verified launch links via Watchmode and/or TMDB APIs."""
+    """Ingests live Netflix availability via JustWatch GraphQL (zero API key), Watchmode, or TMDB."""
 
     provider_id = "netflix"
     WATCHMODE_BASE_URL = "https://api.watchmode.com/v1"
@@ -52,6 +188,9 @@ class NetflixCatalogAdapter(ProviderAdapter):
         descriptor: ProviderDescriptor | None = None,
         session: requests.Session | None = None,
         timeout_seconds: float = 15.0,
+        companion_exe_path: Path | None = None,
+        my_list_content_ids: set[str] | None = None,
+        catalog_limit: int = 60,
     ) -> None:
         self.store = store
         self.watchmode_api_key = (watchmode_api_key or "").strip() or None
@@ -61,10 +200,13 @@ class NetflixCatalogAdapter(ProviderAdapter):
         self.session.headers.update(
             {
                 "Accept": "application/json",
-                "User-Agent": "StreamBridge-Kodi/0.1.0",
+                "User-Agent": "StreamBridge-Kodi/0.1.9",
             }
         )
         self.timeout_seconds = timeout_seconds
+        self.companion_exe_path = companion_exe_path
+        self.my_list_content_ids: set[str] = set(my_list_content_ids or ())
+        self.catalog_limit = catalog_limit
         self._last_refresh: float | None = None
         self._last_error: str | None = None
 
@@ -78,6 +220,36 @@ class NetflixCatalogAdapter(ProviderAdapter):
             auth_delegated_to_browser=True,
         )
 
+    def fetch_my_list_via_companion(self) -> list[dict[str, str]]:
+        """Run `StreamBridge.Player.exe --export-mylist` to read the user's signed-in Netflix My List."""
+        if not (self.companion_exe_path and self.companion_exe_path.exists()):
+            return []
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
+            subprocess.run(
+                [str(self.companion_exe_path), "--export-mylist", str(tmp_path)],
+                shell=False,
+                close_fds=True,
+                creationflags=no_win_flag,
+                timeout=15,
+                check=False,
+            )
+            if tmp_path.exists():
+                raw_text = tmp_path.read_text(encoding="utf-8", errors="ignore")
+                tmp_path.unlink(missing_ok=True)
+                data = json.loads(raw_text) if raw_text.strip() else {}
+                items = data.get("items", [])
+                for item in items:
+                    cid = str(item.get("provider_content_id", "")).strip()
+                    if cid:
+                        self.my_list_content_ids.add(cid)
+                return items
+        except Exception as exc:
+            logger.warning("My List companion extraction skipped: %s", redact_secrets(str(exc)))
+        return []
+
     def refresh_catalog(
         self, region: str = "US", cursor: str | None = None
     ) -> CatalogBatch:
@@ -86,15 +258,205 @@ class NetflixCatalogAdapter(ProviderAdapter):
         if self.tmdb_api_key:
             return self._refresh_from_tmdb(region=region, page=int(cursor or "1"))
 
-        self._last_error = "No Watchmode or TMDB API key configured"
+        return self._refresh_from_justwatch_graphql(region=region, first=self.catalog_limit)
+
+    def _refresh_from_justwatch_graphql(self, region: str = "US", first: int = 60) -> CatalogBatch:
+        """Fetch live regional Netflix Movies & TV Shows from JustWatch public GraphQL (zero API key)."""
+        my_list_entries = self.fetch_my_list_via_companion()
+        try:
+            resp = self.session.post(
+                JUSTWATCH_GRAPHQL_URL,
+                json={
+                    "query": _JUSTWATCH_NETFLIX_QUERY,
+                    "variables": {
+                        "country": region.upper(),
+                        "first": first,
+                    },
+                },
+                timeout=self.timeout_seconds,
+            )
+            resp.raise_for_status()
+            payload: dict[str, Any] = resp.json()
+        except Exception as exc:
+            sanitized_err = redact_secrets(str(exc))
+            self._last_error = f"JustWatch GraphQL request failed: {sanitized_err}"
+            logger.warning("JustWatch catalog fetch failed: %s", sanitized_err)
+            return CatalogBatch(
+                provider=self.provider_id,
+                region=region,
+                revision=f"jw_exc_{int(time.time())}",
+                completeness=SnapshotCompleteness.FAILED,
+                status="network_error",
+                items=[],
+                error_summary=self._last_error,
+            )
+
+        edges = (((payload.get("data") or {}).get("popularTitles") or {}).get("edges")) or []
+        items: list[CatalogItem] = []
+        seen_content_ids: set[str] = set()
+
+        for edge in edges:
+            node = edge.get("node") or {}
+            obj_type = str(node.get("objectType", "MOVIE")).upper()
+            content = node.get("content") or {}
+            offer_node = node.get("watchNowOffer") or {}
+            raw_web_url = str(offer_node.get("standardWebURL") or "")
+            if not raw_web_url:
+                continue
+
+            obj_id = str(node.get("objectId") or "")
+            nf_content_id = _extract_netflix_id(raw_web_url, fallback=obj_id)
+            if not nf_content_id:
+                continue
+
+            try:
+                validated_url = validate_launch_url(
+                    raw_web_url,
+                    provider=self.provider_id,
+                    allowed_hosts=self.descriptor.allowed_hosts,
+                )
+            except Exception:
+                validated_url = self.descriptor.format_title_url(nf_content_id)
+
+            ext_ids = content.get("externalIds") or {}
+            tmdb_id = str(ext_ids["tmdbId"]) if ext_ids.get("tmdbId") else None
+            imdb_id = str(ext_ids["imdbId"]) if ext_ids.get("imdbId") else None
+            scoring = content.get("scoring") or {}
+            imdb_score = (
+                float(scoring["imdbScore"])
+                if scoring.get("imdbScore") is not None
+                else None
+            )
+            age_cert = content.get("ageCertification")
+            year = content.get("originalReleaseYear")
+            plot = content.get("shortDescription")
+            prod_countries = content.get("productionCountries") or []
+            orig_lang = _infer_language_from_countries(prod_countries)
+            is_dubbed = orig_lang != "en" and region.upper() in ("US", "GB", "CA", "AU", "NZ")
+
+            raw_genres = content.get("genres") or []
+            genres = tuple(
+                _JW_GENRE_MAP.get(str(g.get("shortName", "")).lower(), str(g.get("shortName", "")))
+                for g in raw_genres
+                if isinstance(g, dict) and g.get("shortName")
+            )
+
+            in_my_list = nf_content_id in self.my_list_content_ids
+            seen_content_ids.add(nf_content_id)
+
+            if obj_type == "MOVIE":
+                title_obj = Title(
+                    title_id=generate_title_id(),
+                    media_type=MediaType.MOVIE,
+                    title=str(content.get("title") or "Untitled"),
+                    year=int(year) if year else None,
+                    tmdb_id=tmdb_id,
+                    imdb_id=imdb_id,
+                    plot=plot,
+                    original_language=orig_lang,
+                    is_dubbed=is_dubbed,
+                    content_rating=age_cert,
+                    user_rating=imdb_score,
+                    genres=genres,
+                    in_my_list=in_my_list,
+                )
+                offer_obj = Offer(
+                    title_id=title_obj.title_id,
+                    provider=self.provider_id,
+                    provider_content_id=nf_content_id,
+                    region=region,
+                    launch_url=validated_url,
+                    deep_link_url=self.descriptor.format_deep_link(nf_content_id),
+                    availability=AvailabilityState.AVAILABLE,
+                )
+                items.append(CatalogItem(title=title_obj, offer=offer_obj))
+            elif obj_type == "SHOW":
+                show_title = str(content.get("title") or "Untitled Show")
+                parent_key = f"tmdb:{tmdb_id}" if tmdb_id else f"nf:{nf_content_id}"
+                seasons = node.get("seasons") or []
+                for s_node in seasons[:3]:  # Cap initial seasons per show for fast library sync
+                    s_content = s_node.get("content") or {}
+                    season_num = int(s_content.get("seasonNumber") or 1)
+                    episodes = s_node.get("episodes") or []
+                    for ep_node in episodes[:25]:
+                        ep_content = ep_node.get("content") or {}
+                        ep_num = int(ep_content.get("episodeNumber") or 1)
+                        ep_title = str(ep_content.get("title") or f"Episode {ep_num}")
+                        ep_offer_node = ep_node.get("watchNowOffer") or {}
+                        ep_raw_url = str(ep_offer_node.get("standardWebURL") or validated_url)
+                        ep_nf_id = _extract_netflix_id(ep_raw_url, fallback=nf_content_id)
+                        try:
+                            ep_valid_url = validate_launch_url(
+                                ep_raw_url,
+                                provider=self.provider_id,
+                                allowed_hosts=self.descriptor.allowed_hosts,
+                            )
+                        except Exception:
+                            ep_valid_url = validated_url
+
+                        ep_title_obj = Title(
+                            title_id=generate_title_id(),
+                            media_type=MediaType.EPISODE,
+                            title=ep_title,
+                            show_title=show_title,
+                            parent_show_id=parent_key,
+                            season=season_num,
+                            episode=ep_num,
+                            year=int(year) if year else None,
+                            tmdb_id=tmdb_id,
+                            imdb_id=imdb_id,
+                            plot=plot,
+                            original_language=orig_lang,
+                            is_dubbed=is_dubbed,
+                            content_rating=age_cert,
+                            user_rating=imdb_score,
+                            genres=genres,
+                            in_my_list=in_my_list,
+                        )
+                        ep_offer_obj = Offer(
+                            title_id=ep_title_obj.title_id,
+                            provider=self.provider_id,
+                            provider_content_id=ep_nf_id,
+                            region=region,
+                            launch_url=ep_valid_url,
+                            deep_link_url=self.descriptor.format_deep_link(ep_nf_id),
+                            availability=AvailabilityState.AVAILABLE,
+                        )
+                        items.append(CatalogItem(title=ep_title_obj, offer=ep_offer_obj))
+
+        # Include any additional My List items discovered directly from the user's Netflix session
+        for ml_item in my_list_entries:
+            cid = str(ml_item.get("provider_content_id", "")).strip()
+            if not cid or cid in seen_content_ids:
+                continue
+            seen_content_ids.add(cid)
+            ml_url = self.descriptor.format_watch_url(cid)
+            ml_title = Title(
+                title_id=generate_title_id(),
+                media_type=MediaType.MOVIE,
+                title=str(ml_item.get("title") or f"Netflix #{cid}"),
+                in_my_list=True,
+            )
+            ml_offer = Offer(
+                title_id=ml_title.title_id,
+                provider=self.provider_id,
+                provider_content_id=cid,
+                region=region,
+                launch_url=ml_url,
+                deep_link_url=self.descriptor.format_deep_link(cid),
+                availability=AvailabilityState.AVAILABLE,
+            )
+            items.append(CatalogItem(title=ml_title, offer=ml_offer))
+
+        self._last_refresh = time.time()
+        self._last_error = None
         return CatalogBatch(
             provider=self.provider_id,
             region=region,
-            revision=f"no_key_{int(time.time())}",
-            completeness=SnapshotCompleteness.FAILED,
-            status="auth_required",
-            items=[],
-            error_summary=self._last_error,
+            revision=f"jw_{int(self._last_refresh)}",
+            completeness=SnapshotCompleteness.COMPLETE,
+            status="ok",
+            items=items,
         )
 
     def _refresh_from_watchmode(self, region: str, page: int = 1) -> CatalogBatch:
@@ -159,7 +521,12 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 else MediaType.SHOW
             )
             orig_lang = str(entry.get("original_language", "en")).lower()
-            is_dubbed = bool(entry.get("is_dubbed", orig_lang != "en" and region.upper() in ("US", "GB", "CA", "AU", "NZ")))
+            is_dubbed = bool(
+                entry.get(
+                    "is_dubbed",
+                    orig_lang != "en" and region.upper() in ("US", "GB", "CA", "AU", "NZ"),
+                )
+            )
             raw_genres = entry.get("genre_names") or entry.get("genres") or ()
             title = Title(
                 title_id=generate_title_id(),
@@ -173,6 +540,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 content_rating=entry.get("us_rating") or entry.get("content_rating"),
                 user_rating=float(entry["user_rating"]) if entry.get("user_rating") is not None else None,
                 genres=tuple(str(g) for g in raw_genres),
+                in_my_list=(content_id in self.my_list_content_ids),
             )
             offer = Offer(
                 title_id=title.title_id,
@@ -265,6 +633,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 tmdb_id=tmdb_id,
                 premiered=release_date or None,
                 plot=entry.get("overview"),
+                in_my_list=(content_id in self.my_list_content_ids),
             )
             offer = Offer(
                 title_id=title.title_id,
@@ -350,14 +719,6 @@ class NetflixCatalogAdapter(ProviderAdapter):
         return AvailabilityState.UNKNOWN
 
     def health(self) -> AdapterHealth:
-        if not self.watchmode_api_key and not self.tmdb_api_key:
-            return AdapterHealth(
-                provider_id=self.provider_id,
-                status="unconfigured",
-                auth_required=True,
-                last_successful_refresh=self._last_refresh,
-                error_message="Configure a Watchmode or TMDB API key, or enable Fixture mode.",
-            )
         if self._last_error:
             return AdapterHealth(
                 provider_id=self.provider_id,

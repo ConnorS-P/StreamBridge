@@ -7,6 +7,7 @@
 #include <WebView2.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 using Microsoft::WRL::Callback;
@@ -609,6 +610,159 @@ bool ExecutePlayerBackendSession(
             err));
     }
     return ok;
+}
+
+bool ExportNetflixMyListToJson(
+    const std::string& output_json_path,
+    std::string* out_error) {
+    HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit_com = SUCCEEDED(hr_com);
+
+    WebViewHostContext ctx;
+    ctx.initial_url = L"https://www.netflix.com/browse/my-list";
+
+    HINSTANCE hinst = GetModuleHandleW(nullptr);
+    const wchar_t* kClassName = L"StreamBridgeMyListExporterClass";
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = HostWndProc;
+    wc.hInstance = hinst;
+    wc.lpszClassName = kClassName;
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_NOACTIVATE,
+        kClassName,
+        L"StreamBridge MyList Sync",
+        WS_POPUP,
+        -32000,
+        -32000,
+        1280,
+        720,
+        nullptr,
+        nullptr,
+        hinst,
+        &ctx);
+
+    if (!hwnd) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to create hidden MyList window";
+        return false;
+    }
+    ctx.main_hwnd = hwnd;
+
+    std::string captured_json = "{\"items\":[]}";
+    std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
+
+    const wchar_t* kExtractMyListScript = LR"JS(
+    (function() {
+        setTimeout(() => {
+            const seen = new Set();
+            const items = [];
+            const links = document.querySelectorAll('a[href*="/watch/"], a[href*="/title/"]');
+            for (const a of links) {
+                const href = a.getAttribute('href') || '';
+                const m = href.match(/\/(?:watch|title)\/(\d+)/);
+                if (m && m[1] && !seen.has(m[1])) {
+                    seen.add(m[1]);
+                    const label = (a.getAttribute('aria-label') || a.textContent || '').trim();
+                    items.push({ provider_content_id: m[1], title: label || ('Netflix #' + m[1]) });
+                }
+            }
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage(JSON.stringify({ items: items }));
+            }
+        }, 1800);
+    })();
+    )JS";
+
+    SetTimer(hwnd, 9001, 10000, [](HWND h, UINT, UINT_PTR, DWORD) {
+        PostMessageW(h, WM_CLOSE, 0, 0);
+    });
+
+    HRESULT hr_wv = CreateCoreWebView2EnvironmentWithOptions(
+        nullptr,
+        profile_dir.empty() ? nullptr : profile_dir.c_str(),
+        nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [&](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(result) || !env) {
+                    PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                    return result;
+                }
+                return env->CreateCoreWebView2Controller(
+                    ctx.main_hwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [&](HRESULT ctrl_hr, ICoreWebView2Controller* controller) -> HRESULT {
+                            if (FAILED(ctrl_hr) || !controller) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return ctrl_hr;
+                            }
+                            ctx.controller = controller;
+                            controller->get_CoreWebView2(&ctx.webview);
+                            RECT rc = {0, 0, 1280, 720};
+                            controller->put_Bounds(rc);
+                            if (!ctx.webview) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return S_OK;
+                            }
+                            EventRegistrationToken msg_tok = {};
+                            ctx.webview->add_WebMessageReceived(
+                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                    [&](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                                        LPWSTR raw = nullptr;
+                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                                            captured_json = WideToUtf8(raw);
+                                            CoTaskMemFree(raw);
+                                        }
+                                        PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                        return S_OK;
+                                    })
+                                    .Get(),
+                                &msg_tok);
+
+                            EventRegistrationToken nav_tok = {};
+                            ctx.webview->add_NavigationCompleted(
+                                Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                    [&](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                        sender->ExecuteScript(kExtractMyListScript, nullptr);
+                                        return S_OK;
+                                    })
+                                    .Get(),
+                                &nav_tok);
+
+                            ctx.webview->Navigate(ctx.initial_url.c_str());
+                            return S_OK;
+                        })
+                        .Get());
+            })
+            .Get());
+
+    if (FAILED(hr_wv)) {
+        DestroyWindow(hwnd);
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to initialize WebView2 for MyList export";
+        return false;
+    }
+
+    MSG msg = {};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    std::ofstream ofs(output_json_path, std::ios::binary | std::ios::trunc);
+    if (!ofs) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to write output JSON file";
+        return false;
+    }
+    ofs << captured_json;
+    ofs.close();
+
+    if (uninit_com) CoUninitialize();
+    return true;
 }
 
 }  // namespace streambridge

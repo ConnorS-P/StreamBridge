@@ -13,6 +13,7 @@ from pathlib import Path
 
 from streambridge_core.adapters.base import ProviderAdapter
 from streambridge_core.adapters.fixture import FixtureAdapter
+from streambridge_core.adapters.netflix_catalog import NetflixCatalogAdapter
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
@@ -95,7 +96,23 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             / "providers"
             / "netflix_sample_catalog.json"
         )
-        self.adapter = adapter or FixtureAdapter(self.store, fixture_path=default_fixture)
+        if adapter is not None:
+            self.adapter = adapter
+        elif IN_KODI:
+            import xbmcaddon  # type: ignore[import-not-found]
+
+            addon_inst = xbmcaddon.Addon("plugin.video.streambridge")
+            cat_mode = addon_inst.getSettingString("netflix_catalog_mode") or "live_justwatch"
+            wm_key = addon_inst.getSettingString("watchmode_api_key") or None
+            if cat_mode == "fixture":
+                self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
+            else:
+                self.adapter = NetflixCatalogAdapter(
+                    store=self.store,
+                    watchmode_api_key=wm_key,
+                )
+        else:
+            self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
         self.region = region
         self.sync_runs: list[ReconciliationResult] = []
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)

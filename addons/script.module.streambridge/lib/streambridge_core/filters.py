@@ -123,6 +123,10 @@ class LibraryFilterPolicy:
     min_user_rating: float = 0.0
     min_release_year: int = 0
 
+    # Netflix 'My List' filter rules
+    mylist_only: bool = False
+    mylist_bypass_filters: bool = True
+
     @classmethod
     def permissive_default(cls) -> LibraryFilterPolicy:
         """Return a filter policy that allows all languages, ratings, and genres."""
@@ -207,6 +211,8 @@ class LibraryFilterPolicy:
             blocked_genres=tuple(blocked_genres),
             min_user_rating=float(settings_dict.get("min_user_rating", 0.0) or 0.0),
             min_release_year=int(settings_dict.get("min_release_year", 0) or 0),
+            mylist_only=bool(settings_dict.get("mylist_only", False)),
+            mylist_bypass_filters=bool(settings_dict.get("mylist_bypass_filters", True)),
         )
 
 
@@ -220,6 +226,12 @@ class FilterDecision:
 
 def evaluate_title_filter(title: Title, policy: LibraryFilterPolicy) -> FilterDecision:
     """Evaluate whether `title` passes all configured language, rating, genre, and quality filters."""
+    # 0. Netflix 'My List' scope and bypass rules
+    if policy.mylist_only and not title.in_my_list:
+        return FilterDecision(False, "not_in_my_list")
+    if policy.mylist_bypass_filters and title.in_my_list:
+        return FilterDecision(True, None)
+
     # 1. Media type filter
     if title.media_type == MediaType.MOVIE and not policy.include_movies:
         return FilterDecision(False, "media_type_movies_disabled")

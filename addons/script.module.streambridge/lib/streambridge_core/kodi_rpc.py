@@ -159,6 +159,62 @@ class KodiJsonRpcClient:
         except Exception:
             return False
 
+    def reload_current_profile(self) -> str:
+        """Reload the active Kodi profile so `CMediaSourceSettings::Load()` re-reads `sources.xml` into memory."""
+        profile_label = "Master user"
+        try:
+            res = self.call("Profiles.GetCurrentProfile", {"properties": ["lockmode"]})
+            if isinstance(res, dict) and res.get("label"):
+                profile_label = str(res["label"])
+            self.call("Profiles.LoadProfile", {"profile": profile_label})
+        except Exception:
+            return profile_label
+        return profile_label
+
+    def sync_mylist_to_kodi_favourites(self, titles: list[Title]) -> int:
+        """Add `in_my_list` titles to Kodi's native Favourites via `Favourites.AddFavourite`."""
+        synced = 0
+        for title in titles:
+            if not title.in_my_list:
+                continue
+            label = (
+                f"{title.show_title} S{title.season:02d}E{title.episode:02d} - {title.title}"
+                if title.media_type == MediaType.EPISODE and title.show_title and title.season and title.episode
+                else f"{title.title} ({title.year})"
+                if title.year
+                else title.title
+            )
+            self.call(
+                "Favourites.AddFavourite",
+                {
+                    "title": label,
+                    "type": "media",
+                    "path": f"plugin://plugin.video.streambridge/play/{title.title_id}",
+                },
+            )
+            synced += 1
+        return synced
+
+    def apply_mylist_tag_to_kodi_item(
+        self, title: Title, kodi_db_id: int, tag_name: str = "Netflix My List"
+    ) -> bool:
+        """Apply the `Netflix My List` tag to a scraped Kodi library item via JSON-RPC."""
+        if not title.in_my_list:
+            return False
+        if title.media_type == MediaType.MOVIE:
+            self.call(
+                "VideoLibrary.SetMovieDetails",
+                {"movieid": kodi_db_id, "tag": [tag_name]},
+            )
+            return True
+        if title.media_type == MediaType.SHOW:
+            self.call(
+                "VideoLibrary.SetTVShowDetails",
+                {"tvshowid": kodi_db_id, "tag": [tag_name]},
+            )
+            return True
+        return False
+
     def sync_playback_state_to_kodi(
         self, title: Title, state: PlaybackState, kodi_db_id: int | None = None
     ) -> bool:

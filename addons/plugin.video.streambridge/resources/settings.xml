@@ -406,9 +406,10 @@
                 </setting>
                 <setting id="netflix_catalog_mode" type="string" label="30202" help="30203">
                     <level>0</level>
-                    <default>fixture</default>
+                    <default>live_justwatch</default>
                     <constraints>
                         <options>
+                            <option label="30206">live_justwatch</option>
                             <option label="30204">fixture</option>
                             <option label="30205">watchmode</option>
                         </options>
@@ -442,7 +443,7 @@
                     </control>
                 </setting>
                 <setting id="watchmode_api_key" type="string" label="30209" help="30210">
-                    <level>0</level>
+                    <level>2</level>
                     <default/>
                     <constraints>
                         <allowempty>true</allowempty>
@@ -451,6 +452,28 @@
                         <heading>30209</heading>
                         <hidden>true</hidden>
                     </control>
+                </setting>
+            </group>
+            <group id="netflix_mylist_group" label="30018">
+                <setting id="mylist_sync_favourites" type="boolean" label="30240" help="30241">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="mylist_apply_kodi_tag" type="boolean" label="30242" help="30243">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="mylist_bypass_filters" type="boolean" label="30244" help="30245">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="mylist_only" type="boolean" label="30246" help="30247">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
                 </setting>
             </group>
         </category>

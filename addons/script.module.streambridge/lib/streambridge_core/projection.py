@@ -116,6 +116,10 @@ class ProjectionEngine:
             plot_el = ET.SubElement(root, "plot")
             plot_el.text = title.plot
 
+        if title.in_my_list:
+            tag_el = ET.SubElement(root, "tag")
+            tag_el.text = "Netflix My List"
+
         # Unique IDs for Kodi scrapers, TMDb Helper, and Trakt
         default_set = False
         if title.tmdb_id:

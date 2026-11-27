@@ -78,6 +78,7 @@ int main(int argc, char* argv[]) {
     std::wstring pipe_name = L"\\\\.\\pipe\\StreamBridgePlayer";
     std::string login_url;
     std::string watch_url;
+    std::string export_mylist_path;
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
@@ -96,6 +97,8 @@ int main(int argc, char* argv[]) {
             login_url = argv[++i];
         } else if (arg == "--watch" && i + 1 < argc) {
             watch_url = argv[++i];
+        } else if (arg == "--export-mylist" && i + 1 < argc) {
+            export_mylist_path = argv[++i];
         }
     }
 
@@ -105,6 +108,15 @@ int main(int argc, char* argv[]) {
 
     if (diagnose_only) {
         PrintDiagnosticsJson();
+        return 0;
+    }
+
+    if (!export_mylist_path.empty()) {
+        FreeConsole();
+        std::string err;
+        if (!streambridge::ExportNetflixMyListToJson(export_mylist_path, &err)) {
+            return 1;
+        }
         return 0;
     }
 

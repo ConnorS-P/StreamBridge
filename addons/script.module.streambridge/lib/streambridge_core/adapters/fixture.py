@@ -122,6 +122,7 @@ class FixtureAdapter(ProviderAdapter):
                 content_rating=raw.get("content_rating"),
                 user_rating=float(raw["user_rating"]) if raw.get("user_rating") is not None else None,
                 genres=tuple(str(g) for g in raw_genres),
+                in_my_list=bool(raw.get("in_my_list", False)),
             )
 
             offer = Offer(
