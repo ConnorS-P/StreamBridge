@@ -10,6 +10,7 @@ Architecture rules:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import threading
 import time
 from typing import Any
@@ -171,11 +172,38 @@ class KodiJsonRpcClient:
             return profile_label
         return profile_label
 
+    def is_video_source_loaded_in_kodi(self, folder_path: Path) -> bool:
+        """Check via `Files.GetSources` if `folder_path` is already loaded in Kodi's in-memory video sources."""
+        norm_target = str(folder_path.resolve()).replace("/", "\\").rstrip("\\").lower()
+        try:
+            res = self.call("Files.GetSources", {"media": "video"})
+            if isinstance(res, dict):
+                for src in res.get("sources") or []:
+                    file_val = str(src.get("file") or "").replace("/", "\\").rstrip("\\").lower()
+                    if file_val == norm_target:
+                        return True
+        except Exception:
+            return False
+        return False
+
     def sync_mylist_to_kodi_favourites(self, titles: list[Title]) -> int:
-        """Add `in_my_list` titles to Kodi's native Favourites via `Favourites.AddFavourite`."""
+        """Idempotently add `in_my_list` titles to Kodi's native Favourites via `Favourites.AddFavourite`."""
+        existing_paths: set[str] = set()
+        try:
+            fav_res = self.call("Favourites.GetFavourites", {"properties": ["path"]})
+            if isinstance(fav_res, dict):
+                for fav in fav_res.get("favourites") or []:
+                    if isinstance(fav, dict) and fav.get("path"):
+                        existing_paths.add(str(fav["path"]))
+        except Exception:
+            existing_paths = set()
+
         synced = 0
         for title in titles:
             if not title.in_my_list:
+                continue
+            target_uri = f"plugin://plugin.video.streambridge/play/{title.title_id}"
+            if target_uri in existing_paths:
                 continue
             label = (
                 f"{title.show_title} S{title.season:02d}E{title.episode:02d} - {title.title}"
@@ -189,9 +217,10 @@ class KodiJsonRpcClient:
                 {
                     "title": label,
                     "type": "media",
-                    "path": f"plugin://plugin.video.streambridge/play/{title.title_id}",
+                    "path": target_uri,
                 },
             )
+            existing_paths.add(target_uri)
             synced += 1
         return synced
 

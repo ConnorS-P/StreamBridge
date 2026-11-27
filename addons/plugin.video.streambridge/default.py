@@ -254,34 +254,45 @@ class StreamBridgePluginApp:
         prov_dir = format_provider_dir(provider_id)
         base = self.export_root / "Streaming" / prov_dir
         added: list[str] = []
+        any_xml_modified = False
+        any_missing_in_memory = False
 
         if media_type in ("movies", "all"):
             label = f"{prov_dir} (Movies)"
-            self.kodi.ensure_video_source_entry(
-                base / "Movies",
+            movies_dir = base / "Movies"
+            if self.kodi.ensure_video_source_entry(
+                movies_dir,
                 source_name=label,
                 sources_xml_path=sources_xml_path,
-            )
+            ):
+                any_xml_modified = True
+            if not self.rpc.is_video_source_loaded_in_kodi(movies_dir):
+                any_missing_in_memory = True
             added.append(label)
 
         if media_type in ("tvshows", "tv", "all"):
             label = f"{prov_dir} (TV Shows)"
-            self.kodi.ensure_video_source_entry(
-                base / "TV",
+            tv_dir = base / "TV"
+            if self.kodi.ensure_video_source_entry(
+                tv_dir,
                 source_name=label,
                 sources_xml_path=sources_xml_path,
-            )
+            ):
+                any_xml_modified = True
+            if not self.rpc.is_video_source_loaded_in_kodi(tv_dir):
+                any_missing_in_memory = True
             added.append(label)
 
-        # Force Kodi's CMediaSourceSettings::GetInstance().Load() to reload sources.xml into memory
-        # before navigating to the Video Sources window so the new sources appear visually right away.
-        profile_label = self.rpc.reload_current_profile()
-        self.kodi.execute_builtin(f"LoadProfile({profile_label})")
+        # Only trigger LoadProfile when sources.xml was modified or not yet loaded in Kodi's memory
+        if any_xml_modified or any_missing_in_memory:
+            profile_label = self.rpc.reload_current_profile()
+            self.kodi.execute_builtin(f"LoadProfile({profile_label})")
+
         self.kodi.execute_builtin('ActivateWindow(videos,"sources://video/",return)')
         self.kodi.execute_builtin("Container.Refresh")
         self.kodi.notify(
-            "StreamBridge Sources Added",
-            f"Added {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
+            "StreamBridge Sources Ready",
+            f"Verified {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
         )
         return added
 

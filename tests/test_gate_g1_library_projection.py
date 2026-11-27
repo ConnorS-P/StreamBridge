@@ -209,10 +209,25 @@ def test_g1_plugin_routing_and_ecosystem_metadata(tmp_path: Path) -> None:
         parsed_sources = ET.parse(sources_xml).getroot()
         video_names = [el.findtext("name") for el in parsed_sources.findall("./video/source")]
         file_names = [el.findtext("name") for el in parsed_sources.findall("./files/source")]
-        assert "Movies" in video_names
-        assert "Netflix (Movies)" in video_names
-        assert "Netflix (TV Shows)" in video_names
-        assert "StreamBridge Library" in file_names
+        assert video_names == ["Movies", "Netflix (Movies)", "Netflix (TV Shows)"]
+        assert file_names == ["StreamBridge Library"]
+
+        # Calling add_provider_video_sources and ensure_video_source_entry repeatedly must be 100% idempotent
+        # (returns False when unchanged, and never creates duplicate <source> tags)
+        movies_dir = export_root / "Streaming" / "Netflix" / "Movies"
+        assert app.kodi.ensure_video_source_entry(
+            movies_dir, source_name="Netflix (Movies)", sources_xml_path=sources_xml
+        ) is False
+        # Even if called with a different label pointing to the same path, it updates in place without duplicating
+        app.add_provider_video_sources(
+            provider_id="netflix", media_type="all", sources_xml_path=sources_xml
+        )
+        parsed_again = ET.parse(sources_xml).getroot()
+        assert [el.findtext("name") for el in parsed_again.findall("./video/source")] == [
+            "Movies",
+            "Netflix (Movies)",
+            "Netflix (TV Shows)",
+        ]
 
         root_menu = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/", "1", ""])
         assert any("Add Netflix (Movies) to Kodi Video Sources & Sync" in cm[0] for cm in root_menu[0]["context_menu"])

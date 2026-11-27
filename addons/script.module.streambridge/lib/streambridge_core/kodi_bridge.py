@@ -243,72 +243,121 @@ class KodiBridge:
         self.ensure_browseable_source_entry(target / "Streaming", sources_xml_path=None)
         return target
 
-    def ensure_browseable_source_entry(
+    @staticmethod
+    def _normalize_source_path(p: str) -> str:
+        cleaned = (p or "").strip().replace("/", "\\").rstrip("\\")
+        return cleaned.lower()
+
+    def _upsert_xml_source_idempotent(
         self,
-        streaming_dir: Path,
-        sources_xml_path: Path | None = None,
-        source_name: str = "StreamBridge Library",
+        xml_path: Path,
+        section_tag: str,
+        source_name: str,
+        target_dir: Path,
     ) -> bool:
-        """Register `StreamBridge Library` under `<files>` in Kodi's `sources.xml`.
+        """Idempotently ensure `(source_name, target_dir)` exists under `<section_tag>` in `sources.xml`.
 
-        In Kodi, entries under `<files>` appear directly at the top level of the
-        `Videos -> Add videos... -> Browse` dialog, allowing users to follow the
-        standard Kodi 'Add videos -> Browse -> StreamBridge Library -> Netflix -> Movies / TV'
-        workflow without hunting through hidden `%APPDATA%` folders.
+        Returns `True` if `sources.xml` was modified on disk, or `False` if already up-to-date.
+        Matches existing `<source>` entries by either `<name>` (case-insensitive) OR normalized `<path>`,
+        and removes any accidental duplicates.
         """
+        import os
         import xml.etree.ElementTree as ET
-
-        xml_path = sources_xml_path
-        if xml_path is None:
-            if IN_KODI and xbmcvfs is not None:
-                xml_path = Path(xbmcvfs.translatePath("special://profile/sources.xml"))
-            else:
-                return False
 
         if not xml_path.exists():
             root = ET.Element("sources")
-            for section in ("programs", "video", "music", "pictures", "files", "games"):
-                sec_el = ET.SubElement(root, section)
+            for sec in ("programs", "video", "music", "pictures", "files", "games"):
+                sec_el = ET.SubElement(root, sec)
                 ET.SubElement(sec_el, "default", attrib={"pathversion": "1"})
+            changed = True
         else:
             try:
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
+                changed = False
             except Exception as exc:
                 self.log(f"Could not parse sources.xml: {exc}", level="warning")
                 return False
 
-        files_el = root.find("files")
-        if files_el is None:
-            files_el = ET.SubElement(root, "files")
-            ET.SubElement(files_el, "default", attrib={"pathversion": "1"})
+        found_sec = root.find(section_tag)
+        if found_sec is None:
+            sec_el = ET.SubElement(root, section_tag)
+            ET.SubElement(sec_el, "default", attrib={"pathversion": "1"})
+            changed = True
+        else:
+            sec_el = found_sec
 
-        target_path_str = str(streaming_dir.resolve())
+        target_path_str = str(target_dir.resolve())
         if not target_path_str.endswith(("\\", "/")):
             target_path_str += "\\" if "\\" in target_path_str else "/"
+        norm_target = self._normalize_source_path(target_path_str)
+        norm_name = source_name.strip().lower()
 
-        for src in files_el.findall("source"):
+        matched_sources: list[ET.Element] = []
+        for src in list(sec_el.findall("source")):
             name_el = src.find("name")
             path_el = src.find("path")
-            if name_el is not None and name_el.text == source_name:
-                if path_el is not None and path_el.text == target_path_str:
-                    return True
-                if path_el is not None:
-                    path_el.text = target_path_str
-                    break
+            existing_name = (name_el.text or "").strip().lower() if name_el is not None else ""
+            existing_paths = [
+                self._normalize_source_path(p.text or "")
+                for p in src.findall("path")
+                if p.text
+            ]
+            if existing_name == norm_name or norm_target in existing_paths:
+                matched_sources.append(src)
+
+        if matched_sources:
+            primary = matched_sources[0]
+            # Remove any duplicate <source> entries for the same name/path
+            for dup in matched_sources[1:]:
+                sec_el.remove(dup)
+                changed = True
+
+            name_el = primary.find("name")
+            path_el = primary.find("path")
+            if name_el is not None and name_el.text != source_name:
+                name_el.text = source_name
+                changed = True
+            if path_el is not None and path_el.text != target_path_str:
+                path_el.text = target_path_str
+                changed = True
         else:
-            new_src = ET.SubElement(files_el, "source")
+            new_src = ET.SubElement(sec_el, "source")
             name_el = ET.SubElement(new_src, "name")
             name_el.text = source_name
             path_el = ET.SubElement(new_src, "path", attrib={"pathversion": "1"})
             path_el.text = target_path_str
             allow_el = ET.SubElement(new_src, "allowsharing")
             allow_el.text = "true"
+            changed = True
+
+        if not changed:
+            return False
 
         if hasattr(ET, "indent"):
             ET.indent(root, space="    ")
         xml_path.parent.mkdir(parents=True, exist_ok=True)
-        xml_path.write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
+        tmp_path = xml_path.with_name(f".{xml_path.name}.{os.getpid()}.tmp")
+        xml_content = ET.tostring(root, encoding="unicode") + "\n"
+        tmp_path.write_text(xml_content, encoding="utf-8")
+        os.replace(tmp_path, xml_path)
+        return True
+
+    def ensure_browseable_source_entry(
+        self,
+        streaming_dir: Path,
+        sources_xml_path: Path | None = None,
+        source_name: str = "StreamBridge Library",
+    ) -> bool:
+        """Idempotently register `StreamBridge Library` under `<files>` in Kodi's `sources.xml`."""
+        xml_path = sources_xml_path
+        if xml_path is None:
+            if IN_KODI and xbmcvfs is not None:
+                xml_path = Path(xbmcvfs.translatePath("special://profile/sources.xml"))
+            else:
+                return False
+        streaming_dir.mkdir(parents=True, exist_ok=True)
+        self._upsert_xml_source_idempotent(xml_path, "files", source_name, streaming_dir)
         return True
 
     def ensure_video_source_entry(
@@ -317,61 +366,18 @@ class KodiBridge:
         source_name: str,
         sources_xml_path: Path | None = None,
     ) -> bool:
-        """Register a Movie or TV directory directly under `<video>` in Kodi's `sources.xml`."""
-        import xml.etree.ElementTree as ET
+        """Idempotently register a Movie or TV directory under `<video>` in Kodi's `sources.xml`.
 
+        Returns `True` if `sources.xml` was modified, or `False` if the source was already present.
+        """
         xml_path = sources_xml_path
         if xml_path is None:
             if IN_KODI and xbmcvfs is not None:
                 xml_path = Path(xbmcvfs.translatePath("special://profile/sources.xml"))
             else:
                 return False
-
         folder_path.mkdir(parents=True, exist_ok=True)
-
-        if not xml_path.exists():
-            root = ET.Element("sources")
-            for section in ("programs", "video", "music", "pictures", "files", "games"):
-                sec_el = ET.SubElement(root, section)
-                ET.SubElement(sec_el, "default", attrib={"pathversion": "1"})
-        else:
-            try:
-                tree = ET.parse(xml_path)
-                root = tree.getroot()
-            except Exception as exc:
-                self.log(f"Could not parse sources.xml: {exc}", level="warning")
-                return False
-
-        video_el = root.find("video")
-        if video_el is None:
-            video_el = ET.SubElement(root, "video")
-            ET.SubElement(video_el, "default", attrib={"pathversion": "1"})
-
-        target_path_str = str(folder_path.resolve())
-        if not target_path_str.endswith(("\\", "/")):
-            target_path_str += "\\" if "\\" in target_path_str else "/"
-
-        for src in video_el.findall("source"):
-            name_el = src.find("name")
-            path_el = src.find("path")
-            if name_el is not None and name_el.text == source_name:
-                if path_el is not None:
-                    path_el.text = target_path_str
-                break
-        else:
-            new_src = ET.SubElement(video_el, "source")
-            name_el = ET.SubElement(new_src, "name")
-            name_el.text = source_name
-            path_el = ET.SubElement(new_src, "path", attrib={"pathversion": "1"})
-            path_el.text = target_path_str
-            allow_el = ET.SubElement(new_src, "allowsharing")
-            allow_el.text = "true"
-
-        if hasattr(ET, "indent"):
-            ET.indent(root, space="    ")
-        xml_path.parent.mkdir(parents=True, exist_ok=True)
-        xml_path.write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
-        return True
+        return self._upsert_xml_source_idempotent(xml_path, "video", source_name, folder_path)
 
     def load_filter_policy(self) -> LibraryFilterPolicy:
         """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""
