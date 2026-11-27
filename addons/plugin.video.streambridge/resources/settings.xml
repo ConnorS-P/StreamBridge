@@ -1,97 +1,101 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <settings version="1">
     <section id="plugin.video.streambridge">
-        <category id="general" label="General &amp; Library Export">
-            <group id="export_paths" label="Library Projection">
-                <setting id="export_root" type="path" label="Streaming Library Export Root">
+        <category id="general" label="30000" help="">
+            <group id="export_paths" label="30010">
+                <setting id="export_root" type="path" label="30100" help="30101">
                     <level>0</level>
                     <default>special://profile/addon_data/plugin.video.streambridge/library</default>
                     <constraints>
                         <allowempty>false</allowempty>
                     </constraints>
                     <control type="button" format="path">
-                        <heading>Select Streaming Export Directory</heading>
+                        <heading>30102</heading>
                     </control>
                 </setting>
-                <setting id="write_nfo" type="boolean" label="Generate NFO files with TMDB/IMDb UniqueIDs">
+                <setting id="write_nfo" type="boolean" label="30103" help="30104">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="export_unaired" type="boolean" label="Export unaired episodes">
+                <setting id="export_unaired" type="boolean" label="30105" help="30106">
                     <level>1</level>
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="sync_on_startup" type="boolean" label="Sync catalog on Kodi startup">
+                <setting id="sync_on_startup" type="boolean" label="30107" help="30108">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
             </group>
         </category>
-        <category id="providers" label="Providers &amp; Catalogs">
-            <group id="netflix_config" label="Netflix">
-                <setting id="netflix_enabled" type="boolean" label="Enable Netflix Provider">
+        <category id="providers" label="30001" help="">
+            <group id="netflix_config" label="30011">
+                <setting id="netflix_enabled" type="boolean" label="30200" help="30201">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="netflix_catalog_mode" type="string" label="Catalog Source Mode">
+                <setting id="netflix_catalog_mode" type="string" label="30202" help="30203">
                     <level>0</level>
                     <default>fixture</default>
                     <constraints>
                         <options>
-                            <option label="Bundled Sample Fixture Catalog">fixture</option>
-                            <option label="Watchmode API">watchmode</option>
-                            <option label="TMDB Watch Providers API">tmdb</option>
+                            <option label="30204">fixture</option>
+                            <option label="30205">watchmode</option>
+                            <option label="30206">tmdb</option>
                         </options>
                     </constraints>
                     <control type="spinner" format="string"/>
                 </setting>
-                <setting id="region" type="string" label="Catalog Region (ISO-3166-1 alpha-2)">
+                <setting id="region" type="string" label="30207" help="30208">
                     <level>0</level>
                     <default>US</default>
-                    <control type="edit" format="string"/>
+                    <control type="edit" format="string">
+                        <heading>30207</heading>
+                    </control>
                 </setting>
-                <setting id="watchmode_api_key" type="string" label="Watchmode API Key">
+                <setting id="watchmode_api_key" type="string" label="30209" help="30210">
                     <level>0</level>
                     <default/>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
                     <control type="edit" format="string">
+                        <heading>30209</heading>
                         <hidden>true</hidden>
                     </control>
                 </setting>
-                <setting id="tmdb_api_key" type="string" label="TMDB API Key">
+                <setting id="tmdb_api_key" type="string" label="30211" help="30212">
                     <level>0</level>
                     <default/>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
                     <control type="edit" format="string">
+                        <heading>30211</heading>
                         <hidden>true</hidden>
                     </control>
                 </setting>
             </group>
         </category>
-        <category id="playback_security" label="Playback &amp; Security">
-            <group id="playback_group" label="Playback Backend">
-                <setting id="preferred_backend" type="string" label="Preferred Playback Backend">
+        <category id="playback_security" label="30002" help="">
+            <group id="playback_group" label="30012">
+                <setting id="preferred_backend" type="string" label="30300" help="30301">
                     <level>0</level>
                     <default>auto</default>
                     <constraints>
                         <options>
-                            <option label="Auto (StreamBridge.Player WebView2 -&gt; Edge -&gt; Platform Fallback)">auto</option>
-                            <option label="StreamBridge.Player Embedded WebView2">webview2</option>
-                            <option label="Official Microsoft Edge App Mode">official_edge</option>
-                            <option label="Windows Netflix App / Platform Native">netflix_app</option>
+                            <option label="30302">auto</option>
+                            <option label="30303">webview2</option>
+                            <option label="30304">official_edge</option>
+                            <option label="30305">netflix_app</option>
                         </options>
                     </constraints>
                     <control type="spinner" format="string"/>
                 </setting>
-                <setting id="clear_browser_session" type="action" label="Sign Out / Clear Isolated Browser Session Data">
+                <setting id="clear_browser_session" type="action" label="30306" help="30307">
                     <level>0</level>
                     <data>RunPlugin(plugin://plugin.video.streambridge/auth/clear)</data>
                     <control type="button" format="action"/>

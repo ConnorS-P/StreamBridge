@@ -1,0 +1,166 @@
+# Kodi Media Center language file
+# Addon Name: StreamBridge
+# Addon id: plugin.video.streambridge
+# Addon Provider: ConnorS-P
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.streambridge\n"
+"Report-Msgid-Bugs-To: https://github.com/ConnorS-P/StreamBridge/issues\n"
+"POT-Creation-Date: 2026-11-27 00:00+0000\n"
+"PO-Revision-Date: 2026-11-27 00:00+0000\n"
+"Last-Translator: ConnorS-P\n"
+"Language-Team: English (United Kingdom)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Categories (30000 - 30009)
+msgctxt "#30000"
+msgid "General & Library Export"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Providers & Catalogs"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Playback & Security"
+msgstr ""
+
+# Groups (30010 - 30019)
+msgctxt "#30010"
+msgid "Library Projection"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Netflix"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Playback Backend & Session Security"
+msgstr ""
+
+# General & Library Export Settings (30100 - 30119)
+msgctxt "#30100"
+msgid "Streaming Library Export Root"
+msgstr ""
+
+msgctxt "#30101"
+msgid "Directory where StreamBridge generates per-provider Movie and TV .strm and .nfo files for Kodi's library scanner."
+msgstr ""
+
+msgctxt "#30102"
+msgid "Select Streaming Export Directory"
+msgstr ""
+
+msgctxt "#30103"
+msgid "Generate NFO files with TMDB/IMDb UniqueIDs"
+msgstr ""
+
+msgctxt "#30104"
+msgid "Write companion .nfo files containing canonical TMDB, IMDb, and Netflix IDs for accurate scraping and Trakt/TMDb Helper integration. User-edited NFOs are never overwritten."
+msgstr ""
+
+msgctxt "#30105"
+msgid "Export unaired episodes"
+msgstr ""
+
+msgctxt "#30106"
+msgid "Include unaired future episodes when exporting TV series seasons."
+msgstr ""
+
+msgctxt "#30107"
+msgid "Sync catalog on Kodi startup"
+msgstr ""
+
+msgctxt "#30108"
+msgid "Automatically queue a background catalog sync when Kodi starts."
+msgstr ""
+
+# Providers & Catalogs Settings (30200 - 30229)
+msgctxt "#30200"
+msgid "Enable Netflix Provider"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Include Netflix titles in StreamBridge catalog sync and library export."
+msgstr ""
+
+msgctxt "#30202"
+msgid "Catalog Source Mode"
+msgstr ""
+
+msgctxt "#30203"
+msgid "Select how StreamBridge discovers Netflix catalog availability and launch links."
+msgstr ""
+
+msgctxt "#30204"
+msgid "Bundled Sample Fixture Catalog"
+msgstr ""
+
+msgctxt "#30205"
+msgid "Watchmode API"
+msgstr ""
+
+msgctxt "#30206"
+msgid "TMDB Watch Providers API"
+msgstr ""
+
+msgctxt "#30207"
+msgid "Catalog Region (ISO-3166-1 alpha-2)"
+msgstr ""
+
+msgctxt "#30208"
+msgid "Two-letter country code used for regional streaming availability (e.g. US, GB, CA, DE)."
+msgstr ""
+
+msgctxt "#30209"
+msgid "Watchmode API Key"
+msgstr ""
+
+msgctxt "#30210"
+msgid "Optional Watchmode API key for live regional Netflix catalog ingestion."
+msgstr ""
+
+msgctxt "#30211"
+msgid "TMDB API Key"
+msgstr ""
+
+msgctxt "#30212"
+msgid "Optional TMDB v3 API key for TMDB Watch Providers catalog discovery."
+msgstr ""
+
+# Playback & Security Settings (30300 - 30329)
+msgctxt "#30300"
+msgid "Preferred Playback Backend"
+msgstr ""
+
+msgctxt "#30301"
+msgid "Choose the preferred playback engine when launching a streaming title."
+msgstr ""
+
+msgctxt "#30302"
+msgid "Auto (StreamBridge.Player WebView2 -> Edge -> Platform Fallback)"
+msgstr ""
+
+msgctxt "#30303"
+msgid "StreamBridge.Player Embedded WebView2"
+msgstr ""
+
+msgctxt "#30304"
+msgid "Official Microsoft Edge App Mode"
+msgstr ""
+
+msgctxt "#30305"
+msgid "Windows Netflix App / Platform Native"
+msgstr ""
+
+msgctxt "#30306"
+msgid "Sign Out / Clear Isolated Browser Session Data"
+msgstr ""
+
+msgctxt "#30307"
+msgid "Wipes the isolated DPAPI-encrypted browser profile directory used for streaming logins."
+msgstr ""

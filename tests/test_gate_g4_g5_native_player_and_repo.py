@@ -189,3 +189,32 @@ def test_kodi_repository_builder_generates_valid_index_and_hashes() -> None:
         assert sha_path.exists()
         expected_sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
         assert sha_path.read_text(encoding="utf-8").strip() == expected_sha
+
+
+def test_kodi_settings_xml_labels_match_strings_po() -> None:
+    import re
+    import xml.etree.ElementTree as ET
+
+    root_dir = Path(__file__).resolve().parents[1]
+    addon_dir = root_dir / "addons" / "plugin.video.streambridge"
+    settings_xml = addon_dir / "resources" / "settings.xml"
+    strings_po = addon_dir / "resources" / "language" / "resource.language.en_gb" / "strings.po"
+
+    assert settings_xml.exists()
+    assert strings_po.exists()
+
+    po_text = strings_po.read_text(encoding="utf-8")
+    defined_ids = set(re.findall(r'msgctxt\s+"#(\d+)"', po_text))
+    assert len(defined_ids) >= 20
+
+    tree = ET.parse(settings_xml)
+    for elem in tree.iter():
+        for attr in ("label", "help"):
+            val = elem.attrib.get(attr)
+            if val:
+                assert val.isdigit(), f"<{elem.tag} {attr}={val!r}> must be a numeric string ID"
+                assert val in defined_ids, f"String ID #{val} in <{elem.tag}> not found in strings.po"
+        if elem.tag == "heading" and elem.text:
+            val = elem.text.strip()
+            assert val.isdigit(), f"<heading>{val}</heading> must be a numeric string ID"
+            assert val in defined_ids, f"Heading ID #{val} not found in strings.po"
