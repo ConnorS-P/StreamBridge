@@ -228,6 +228,10 @@ class StreamBridgePluginApp:
                 import xbmc  # type: ignore[import-not-found]
                 import xbmcgui  # type: ignore[import-not-found]
 
+                was_mouse_enabled = self.rpc.get_mouse_enabled()
+                if not was_mouse_enabled:
+                    self.rpc.set_mouse_enabled(True)
+
                 dlg = xbmcgui.WindowDialog()
                 header = xbmcgui.ControlLabel(
                     x=0,
@@ -250,6 +254,8 @@ class StreamBridgePluginApp:
                         xbmc.sleep(150)
                 finally:
                     dlg.close()
+                    if not was_mouse_enabled:
+                        self.rpc.set_mouse_enabled(False)
                 self.kodi.notify("StreamBridge Login", "Netflix session saved.")
                 return True
 

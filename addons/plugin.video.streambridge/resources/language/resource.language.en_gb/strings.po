@@ -137,11 +137,11 @@ msgid "Include Netflix titles in StreamBridge catalog sync and library export."
 msgstr ""
 
 msgctxt "#30213"
-msgid "Sign In to Netflix (Open Isolated Browser Session)"
+msgid "Sign In to Netflix"
 msgstr ""
 
 msgctxt "#30214"
-msgid "Opens Netflix in StreamBridge's isolated DPAPI-encrypted Edge profile. Sign in once and close the window (Alt+F4) to persist your session."
+msgid "Opens an in-Kodi Netflix sign-in card with automatic input focus, arrow-key navigation, and temporary mouse pointer support. Closes automatically once signed in (or press ESC / Back to cancel)."
 msgstr ""
 
 msgctxt "#30202"

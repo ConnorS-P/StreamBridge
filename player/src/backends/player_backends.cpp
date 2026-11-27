@@ -18,6 +18,81 @@ namespace {
 
 constexpr COLORREF kKodiOsdChromaKey = RGB(1, 2, 1);
 
+const wchar_t* kNetflixLoginNavigationScript = LR"JS(
+(function() {
+    if (window.__sbLoginInjected) return;
+    window.__sbLoginInjected = true;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        input:focus, button:focus, a:focus, [tabindex]:focus {
+            outline: 3px solid #e50914 !important;
+            outline-offset: 2px !important;
+            box-shadow: 0 0 14px rgba(229, 9, 20, 0.85) !important;
+        }
+    `;
+    const injectStyle = () => {
+        if (document.head && !style.parentNode) document.head.appendChild(style);
+    };
+    injectStyle();
+    document.addEventListener('DOMContentLoaded', injectStyle);
+
+    function getFocusableItems() {
+        const selector = [
+            'input:not([type="hidden"]):not([disabled])',
+            'button[type="submit"]:not([disabled])',
+            'button[data-uia*="login"]:not([disabled])',
+            'button[data-uia*="submit"]:not([disabled])',
+            'a.profile-link',
+            '[data-uia*="profile-button"]',
+            'button:not([disabled])'
+        ].join(', ');
+        return Array.from(document.querySelectorAll(selector)).filter(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 10 && r.height > 10 && window.getComputedStyle(el).visibility !== 'hidden';
+        });
+    }
+
+    function autoFocusPrimaryField() {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'BUTTON' || active.tagName === 'A')) {
+            return;
+        }
+        const primaryInput = document.querySelector(
+            'input[name="userLoginId"], input[type="email"], input[type="tel"], input[type="text"], input[type="password"]'
+        );
+        if (primaryInput) {
+            primaryInput.focus();
+            return;
+        }
+        const items = getFocusableItems();
+        if (items.length > 0) {
+            items[0].focus();
+        }
+    }
+
+    setTimeout(autoFocusPrimaryField, 250);
+    setTimeout(autoFocusPrimaryField, 800);
+    setTimeout(autoFocusPrimaryField, 1600);
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const items = getFocusableItems();
+            if (items.length === 0) return;
+            const idx = items.indexOf(document.activeElement);
+            let nextIdx = 0;
+            if (e.key === 'ArrowDown') {
+                nextIdx = (idx >= 0 && idx + 1 < items.length) ? idx + 1 : 0;
+            } else {
+                nextIdx = (idx > 0) ? idx - 1 : items.length - 1;
+            }
+            items[nextIdx].focus();
+            e.preventDefault();
+        }
+    }, true);
+})();
+)JS";
+
 const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
 (function() {
     if (window.__sbInjected) return;
@@ -348,6 +423,7 @@ bool RunInteractiveWebView2Window(
         SetWindowPos(hwnd, ctx.kodi_hwnd, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetForegroundWindow(ctx.kodi_hwnd);
     } else {
+        ShowCursor(TRUE);
         ShowWindow(hwnd, SW_SHOW);
         SetFocus(hwnd);
     }
@@ -380,6 +456,9 @@ bool RunInteractiveWebView2Window(
 
                             ResizeWebViewBounds(&ctx);
                             controller->put_IsVisible(TRUE);
+                            if (ctx.is_login_session) {
+                                controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+                            }
 
                             // Intercept ESC, Browser Back, and Media Stop
                             EventRegistrationToken accel_token = {};
@@ -406,6 +485,10 @@ bool RunInteractiveWebView2Window(
                             if (!ctx.webview) return S_OK;
 
                             if (ctx.is_login_session) {
+                                // Auto-focus email/password fields, add red focus ring, and enable Up/Down arrow navigation
+                                ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                    kNetflixLoginNavigationScript, nullptr);
+
                                 // Auto-close the WS_CHILD login card as soon as Netflix redirects to /browse
                                 EventRegistrationToken src_token = {};
                                 ctx.webview->add_SourceChanged(

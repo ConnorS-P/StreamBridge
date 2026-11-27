@@ -135,6 +135,30 @@ class KodiJsonRpcClient:
         except Exception:
             return True
 
+    def get_mouse_enabled(self) -> bool:
+        """Return current value of Kodi's `input.enablemouse` setting."""
+        try:
+            res = self.call(
+                "Settings.GetSettingValue",
+                {"setting": "input.enablemouse"},
+            )
+            if isinstance(res, dict) and "value" in res:
+                return bool(res["value"])
+            return True
+        except Exception:
+            return True
+
+    def set_mouse_enabled(self, enabled: bool) -> bool:
+        """Set Kodi's `input.enablemouse` setting via JSON-RPC."""
+        try:
+            self.call(
+                "Settings.SetSettingValue",
+                {"setting": "input.enablemouse", "value": bool(enabled)},
+            )
+            return True
+        except Exception:
+            return False
+
     def sync_playback_state_to_kodi(
         self, title: Title, state: PlaybackState, kodi_db_id: int | None = None
     ) -> bool:
