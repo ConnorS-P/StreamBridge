@@ -118,6 +118,23 @@ class KodiJsonRpcClient:
         self.call("VideoLibrary.Clean", params)
         return True
 
+    def is_fake_fullscreen_enabled(self) -> bool:
+        """Return `True` if Kodi's `videoscreen.fakefullscreen` ('Use fullscreen window') is enabled.
+
+        StreamBridge's in-Kodi `WS_CHILD` surface and DWM skin OSD overlay require DXGI Flip Model
+        ('Use fullscreen window' = ON) and are incompatible with legacy Direct3D Exclusive Fullscreen.
+        """
+        try:
+            res = self.call(
+                "Settings.GetSettingValue",
+                {"setting": "videoscreen.fakefullscreen"},
+            )
+            if isinstance(res, dict) and "value" in res:
+                return bool(res["value"])
+            return True
+        except Exception:
+            return True
+
     def sync_playback_state_to_kodi(
         self, title: Title, state: PlaybackState, kodi_db_id: int | None = None
     ) -> bool:

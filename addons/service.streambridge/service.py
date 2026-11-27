@@ -16,6 +16,7 @@ from streambridge_core.adapters.fixture import FixtureAdapter
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
+from streambridge_core.osd_overlay import disable_kodi_osd_cutout
 from streambridge_core.projection import ProjectionEngine
 from streambridge_core.reconciler import ReconciliationEngine, ReconciliationResult
 
@@ -23,6 +24,7 @@ try:
     import xbmc  # type: ignore[import-not-found]
 
     _BaseMonitor = xbmc.Monitor
+    _BasePlayer = xbmc.Player
 except ImportError:
 
     class _BaseMonitor:  # type: ignore[no-redef]
@@ -31,6 +33,37 @@ except ImportError:
 
         def abortRequested(self) -> bool:
             return True
+
+    class _BasePlayer:  # type: ignore[no-redef]
+        pass
+
+
+class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
+    """Monitors Kodi's native VideoPlayer during OSD proxy playback to keep skin OSD and underlay synced."""
+
+    def __init__(self, kodi_bridge: KodiBridge) -> None:
+        super().__init__()
+        self.kodi = kodi_bridge
+        self.last_action: str | None = None
+        self.last_seek_seconds: float | None = None
+
+    def onPlayBackPaused(self) -> None:
+        self.last_action = "pause"
+
+    def onPlayBackResumed(self) -> None:
+        self.last_action = "resume"
+
+    def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
+        self.last_action = "seek"
+        self.last_seek_seconds = float(time_ms) / 1000.0
+
+    def onPlayBackStopped(self) -> None:
+        self.last_action = "stop"
+        disable_kodi_osd_cutout()
+
+    def onPlayBackEnded(self) -> None:
+        self.last_action = "ended"
+        disable_kodi_osd_cutout()
 
 
 class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
@@ -65,6 +98,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.adapter = adapter or FixtureAdapter(self.store, fixture_path=default_fixture)
         self.region = region
         self.sync_runs: list[ReconciliationResult] = []
+        self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
 
     def run_startup_sync(self) -> ReconciliationResult:
         """Perform initial provider reconciliation on service startup."""

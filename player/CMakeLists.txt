@@ -22,6 +22,19 @@ add_executable(StreamBridge.Player
     src/backends/player_backends.cpp
 )
 
+add_library(StreamBridge.Overlay SHARED
+    src/overlay_dll.cpp
+)
+
+target_link_libraries(StreamBridge.Overlay PRIVATE
+    user32
+    gdi32
+)
+
+if(MSVC)
+    target_compile_options(StreamBridge.Overlay PRIVATE /W4 /WX /EHsc /utf-8)
+endif()
+
 target_include_directories(StreamBridge.Player PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${webview2_sdk_SOURCE_DIR}/build/native/include

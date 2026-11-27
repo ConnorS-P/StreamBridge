@@ -141,18 +141,31 @@ def test_g3_graceful_non_windows_fallbacks(tmp_path: Path) -> None:
     assert res_android.backend_used == "android_intent"
     assert any("StartAndroidActivity" in cmd and "com.netflix.ninja" in cmd for cmd in kodi_android.executed_builtins)
 
-    # Case 2: Linux / LibreELEC with companion Kodi add-on `plugin.video.netflix` installed
-    class CompanionKodiBridge(KodiBridge):
-        def has_addon(self, addon_id: str) -> bool:
-            return addon_id == "plugin.video.netflix"
+    # Case 2: Exclusive fullscreen (videoscreen.fakefullscreen = false) on Windows is blocked with a clear dialog
+    def fake_rpc_exclusive_fullscreen(req_str: str) -> str:
+        req = json.loads(req_str)
+        if req.get("method") == "Settings.GetSettingValue":
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"value": False}})
+        return '{"jsonrpc": "2.0", "id": 1, "result": "OK"}'
 
-    kodi_elec = CompanionKodiBridge()
-    broker_elec = PlaybackBroker(store=store, kodi_bridge=kodi_elec)
-    res_elec = broker_elec.play_title(
-        adapter, "sb_nf_movie_nimona", platform_override="linux"
+    kodi_excl = KodiBridge()
+    rpc_excl = KodiJsonRpcClient(rpc_Transport=fake_rpc_exclusive_fullscreen)
+    broker_excl = PlaybackBroker(store=store, kodi_bridge=kodi_excl, kodi_rpc=rpc_excl)
+    res_excl = broker_excl.play_title(
+        adapter, "sb_nf_movie_nimona", platform_override="win32"
     )
-    assert res_elec.backend_used == "kodi_addon:plugin.video.netflix"
-    assert any("PlayMedia(plugin://plugin.video.netflix/" in cmd for cmd in kodi_elec.executed_builtins)
+    assert res_excl.final_state == PlaybackSessionState.FAILED
+    assert res_excl.backend_used == "incompatible_display_mode"
+    assert any("Incompatible Display Mode" in heading for heading, _ in kodi_excl.notifications)
+
+    # Case 3: Verify silent chroma-key AVI generator for Native Skin OSD Overlay
+    from streambridge_core.osd_overlay import generate_chroma_key_avi
+
+    avi_path = generate_chroma_key_avi(tmp_path / "osd_proxy_key.avi", duration_seconds=5, fps=1)
+    assert avi_path.exists()
+    avi_bytes = avi_path.read_bytes()
+    assert avi_bytes[:4] == b"RIFF"
+    assert avi_bytes[8:12] == b"AVI "
     store.close()
 
 

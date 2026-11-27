@@ -48,7 +48,6 @@ def detect_platform_environment(
 ) -> PlatformEnvironment:
     """Detect the current platform and available playback pathways."""
     raw_platform = (platform_override or sys.platform).lower()
-    descriptor = load_provider_descriptor(provider_id)
 
     is_windows = raw_platform.startswith("win")
     if is_windows:
@@ -68,13 +67,6 @@ def detect_platform_environment(
     if is_windows and companion_exe_path and Path(companion_exe_path).exists():
         resolved_exe = Path(companion_exe_path)
 
-    has_companion_addon = False
-    if has_kodi_addon_check and descriptor.companion_kodi_addon:
-        try:
-            has_companion_addon = bool(has_kodi_addon_check(descriptor.companion_kodi_addon))
-        except Exception:
-            has_companion_addon = False
-
     browser_cmd = _find_desktop_browser(os_family)
 
     return PlatformEnvironment(
@@ -82,7 +74,7 @@ def detect_platform_environment(
         is_windows=is_windows,
         has_native_companion_exe=(resolved_exe is not None),
         companion_exe_path=resolved_exe,
-        has_companion_kodi_addon=has_companion_addon,
+        has_companion_kodi_addon=False,
         desktop_browser_cmd=browser_cmd,
     )
 
@@ -133,7 +125,7 @@ def build_non_windows_fallback_plan(
     """Determine the safest non-Windows playback action for `descriptor`.
 
     Returns a dictionary with:
-    - `mode`: `"kodi_addon"`, `"android_intent"`, `"desktop_browser"`, or `"unsupported"`
+    - `mode`: `"android_intent"`, `"desktop_browser"`, or `"unsupported"`
     - `target`: URI, command, or user-facing message
     """
     prov = provider_descriptor or load_provider_descriptor(descriptor.provider)
@@ -142,14 +134,6 @@ def build_non_windows_fallback_plan(
         provider=descriptor.provider,
         allowed_hosts=prov.allowed_hosts,
     )
-
-    if env.has_companion_kodi_addon and prov.companion_kodi_uri_template:
-        uri = prov.companion_kodi_uri_template.format(content_id=descriptor.provider_content_id)
-        return {
-            "mode": "kodi_addon",
-            "target": uri,
-            "addon_id": prov.companion_kodi_addon,
-        }
 
     if env.os_family == "android" and prov.android_package:
         deep_link = prov.android_deep_link_template.format(content_id=descriptor.provider_content_id)
@@ -171,8 +155,8 @@ def build_non_windows_fallback_plan(
     return {
         "mode": "unsupported",
         "target": (
-            f"StreamBridge library sync is active on {env.os_family}, but no playback backend "
-            f"(StreamBridge.Player, {prov.companion_kodi_addon}, or desktop browser) was found."
+            f"StreamBridge library sync is active on {env.os_family}, but no supported playback backend "
+            f"(StreamBridge.Player or desktop browser) was found."
         ),
     }
 

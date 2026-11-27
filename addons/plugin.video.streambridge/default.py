@@ -205,19 +205,52 @@ class StreamBridgePluginApp:
         return cleared
 
     def launch_provider_login(self, provider_id: str = "netflix") -> bool:
-        """Open the provider's official login page inside StreamBridge.Player's native WebView2 host."""
+        """Open the provider's official login page inside Kodi as a centered WS_CHILD surface."""
         import subprocess
 
         from streambridge_core.platform_compat import detect_platform_environment
+
+        if not self.rpc.is_fake_fullscreen_enabled():
+            self.kodi.show_ok_dialog(
+                "StreamBridge — Incompatible Display Mode",
+                "StreamBridge renders inside Kodi's window using Windows DirectComposition, "
+                "which is incompatible with legacy Exclusive Fullscreen.\n\n"
+                "Please enable 'Use fullscreen window' under Settings -> System -> Display.",
+            )
+            return False
 
         login_url = validate_launch_url("https://www.netflix.com/login", provider=provider_id)
         profile_dir = get_isolated_browser_profile_dir()
 
         if self.companion_exe_path and self.companion_exe_path.exists():
-            self.kodi.notify(
-                "StreamBridge Login",
-                "Opening Netflix Sign-In window. Click 'Return to Kodi' or press ESC when done.",
-            )
+            if IN_KODI:
+                import xbmc  # type: ignore[import-not-found]
+                import xbmcgui  # type: ignore[import-not-found]
+
+                dlg = xbmcgui.WindowDialog()
+                header = xbmcgui.ControlLabel(
+                    x=160,
+                    y=30,
+                    width=1600,
+                    height=50,
+                    label="StreamBridge Netflix Sign-In — Closes automatically once signed in (or press ESC / Back)",
+                    alignment=2,
+                )
+                dlg.addControl(header)
+                dlg.show()
+                try:
+                    proc = subprocess.Popen(
+                        [str(self.companion_exe_path), "--login", login_url],
+                        shell=False,
+                        close_fds=True,
+                    )
+                    while proc.poll() is None and not xbmc.Monitor().abortRequested():
+                        xbmc.sleep(150)
+                finally:
+                    dlg.close()
+                self.kodi.notify("StreamBridge Login", "Netflix session saved.")
+                return True
+
             subprocess.Popen(
                 [str(self.companion_exe_path), "--login", login_url],
                 shell=False,

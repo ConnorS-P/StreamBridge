@@ -28,6 +28,11 @@ from .models import (
     PlaybackState,
     SessionEvent,
 )
+from .osd_overlay import (
+    disable_kodi_osd_cutout,
+    enable_kodi_osd_cutout,
+    generate_chroma_key_avi,
+)
 from .platform_compat import (
     PlatformEnvironment,
     build_non_windows_fallback_plan,
@@ -94,6 +99,24 @@ class PlaybackBroker:
             platform_override=platform_override,
         )
 
+        if env.is_windows and not self.rpc.is_fake_fullscreen_enabled():
+            incompat_msg = (
+                "StreamBridge renders inside Kodi's window using Windows DirectComposition, "
+                "which is incompatible with legacy Exclusive Fullscreen.\n\n"
+                "Please enable 'Use fullscreen window' under Settings -> System -> Display."
+            )
+            self.kodi.show_ok_dialog("StreamBridge — Incompatible Display Mode", incompat_msg)
+            return PlaybackSessionResult(
+                session_id=descriptor.session_id,
+                title_id=descriptor.title_id,
+                backend_used="incompatible_display_mode",
+                final_state=PlaybackSessionState.FAILED,
+                telemetry_verified=False,
+                events=[],
+                persisted_state=None,
+                error_message="incompatible_display_mode_exclusive_fullscreen",
+            )
+
         # Capture Kodi state, set Window(10000) Trakt/TMDb Helper properties, and release audio
         self.kodi.set_ecosystem_window_properties(descriptor)
         self.kodi.release_kodi_audio_device()
@@ -105,12 +128,21 @@ class PlaybackBroker:
             if env.has_native_companion_exe and env.companion_exe_path is not None:
                 import subprocess
 
-                proc = subprocess.Popen(
-                    [str(env.companion_exe_path), "--watch", descriptor.launch_url],
-                    shell=False,
-                    close_fds=True,
+                proxy_avi = generate_chroma_key_avi(
+                    self.kodi.get_profile_dir() / "osd_proxy_key.avi",
+                    duration_seconds=120,
                 )
-                proc.wait()
+                self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
+                enable_kodi_osd_cutout()
+                try:
+                    proc = subprocess.Popen(
+                        [str(env.companion_exe_path), "--watch", descriptor.launch_url],
+                        shell=False,
+                        close_fds=True,
+                    )
+                    proc.wait()
+                finally:
+                    disable_kodi_osd_cutout()
                 events = make_unverified_browser_events(descriptor, backend_name="webview2_native_host")
                 return PlaybackSessionResult(
                     session_id=descriptor.session_id,

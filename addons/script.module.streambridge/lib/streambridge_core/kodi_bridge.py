@@ -73,6 +73,13 @@ class KodiBridge:
             icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
             xbmcgui.Dialog().notification(heading, sanitized_msg, icon, 4000)
 
+    def show_ok_dialog(self, heading: str, message: str) -> None:
+        """Display a modal Kodi OK dialog (used for incompatible display mode errors)."""
+        sanitized_msg = redact_secrets(message)
+        self.notifications.append((heading, sanitized_msg))
+        if IN_KODI and xbmcgui is not None:
+            xbmcgui.Dialog().ok(heading, sanitized_msg)
+
     def has_addon(self, addon_id: str) -> bool:
         if IN_KODI and xbmc is not None:
             return bool(xbmc.getCondVisibility(f"System.HasAddon({addon_id})"))

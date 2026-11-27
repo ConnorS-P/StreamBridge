@@ -35,11 +35,14 @@ jobs:
           cmake --build player/build --config Release
           .\player\build\Release\StreamBridge.Player.exe --self-test
 
-      - name: Bundle StreamBridge.Player.exe into plugin.video.streambridge
+      - name: Bundle StreamBridge.Player.exe and StreamBridge.Overlay.dll into plugin.video.streambridge
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "addons/plugin.video.streambridge/bin" | Out-Null
           Copy-Item -Force "player/build/Release/StreamBridge.Player.exe" "addons/plugin.video.streambridge/bin/StreamBridge.Player.exe"
+          if (Test-Path "player/build/Release/StreamBridge.Overlay.dll") {
+            Copy-Item -Force "player/build/Release/StreamBridge.Overlay.dll" "addons/plugin.video.streambridge/bin/StreamBridge.Overlay.dll"
+          }
 
       - name: Build Kodi Repository (addons.xml, addons.xml.md5, .zip, .sha256)
         run: python scripts/build_kodi_repo.py
@@ -50,6 +53,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path "release_assets" | Out-Null
           Copy-Item -Force "dist/repository.streambridge.zip" "release_assets/"
           Copy-Item -Force "player/build/Release/StreamBridge.Player.exe" "release_assets/"
+          if (Test-Path "player/build/Release/StreamBridge.Overlay.dll") {
+            Copy-Item -Force "player/build/Release/StreamBridge.Overlay.dll" "release_assets/"
+          }
           Get-ChildItem -Path "dist/repo" -Recurse -Include "*.zip","*.sha256","addons.xml","addons.xml.md5" | ForEach-Object {
             Copy-Item -Force $_.FullName "release_assets/"
           }
