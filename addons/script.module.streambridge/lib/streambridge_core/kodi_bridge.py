@@ -311,6 +311,68 @@ class KodiBridge:
         xml_path.write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
         return True
 
+    def ensure_video_source_entry(
+        self,
+        folder_path: Path,
+        source_name: str,
+        sources_xml_path: Path | None = None,
+    ) -> bool:
+        """Register a Movie or TV directory directly under `<video>` in Kodi's `sources.xml`."""
+        import xml.etree.ElementTree as ET
+
+        xml_path = sources_xml_path
+        if xml_path is None:
+            if IN_KODI and xbmcvfs is not None:
+                xml_path = Path(xbmcvfs.translatePath("special://profile/sources.xml"))
+            else:
+                return False
+
+        folder_path.mkdir(parents=True, exist_ok=True)
+
+        if not xml_path.exists():
+            root = ET.Element("sources")
+            for section in ("programs", "video", "music", "pictures", "files", "games"):
+                sec_el = ET.SubElement(root, section)
+                ET.SubElement(sec_el, "default", attrib={"pathversion": "1"})
+        else:
+            try:
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+            except Exception as exc:
+                self.log(f"Could not parse sources.xml: {exc}", level="warning")
+                return False
+
+        video_el = root.find("video")
+        if video_el is None:
+            video_el = ET.SubElement(root, "video")
+            ET.SubElement(video_el, "default", attrib={"pathversion": "1"})
+
+        target_path_str = str(folder_path.resolve())
+        if not target_path_str.endswith(("\\", "/")):
+            target_path_str += "\\" if "\\" in target_path_str else "/"
+
+        for src in video_el.findall("source"):
+            name_el = src.find("name")
+            path_el = src.find("path")
+            if name_el is not None and name_el.text == source_name:
+                if path_el is not None:
+                    path_el.text = target_path_str
+                break
+        else:
+            new_src = ET.SubElement(video_el, "source")
+            name_el = ET.SubElement(new_src, "name")
+            name_el.text = source_name
+            path_el = ET.SubElement(new_src, "path", attrib={"pathversion": "1"})
+            path_el.text = target_path_str
+            allow_el = ET.SubElement(new_src, "allowsharing")
+            allow_el.text = "true"
+
+        if hasattr(ET, "indent"):
+            ET.indent(root, space="    ")
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
+        return True
+
     def load_filter_policy(self) -> LibraryFilterPolicy:
         """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""
         if not (IN_KODI and xbmcaddon is not None):

@@ -211,6 +211,45 @@ class StreamBridgePluginApp:
         )
         return cleared
 
+    def add_provider_video_sources(
+        self,
+        provider_id: str = "netflix",
+        media_type: str = "all",
+        sources_xml_path: Path | None = None,
+    ) -> list[str]:
+        """Sync catalog and register `<video>` sources in Kodi's `sources.xml`."""
+        from streambridge_core.projection import format_provider_dir
+
+        self.sync_provider(provider_id=provider_id)
+        prov_dir = format_provider_dir(provider_id)
+        base = self.export_root / "Streaming" / prov_dir
+        added: list[str] = []
+
+        if media_type in ("movies", "all"):
+            label = f"{prov_dir} (Movies)"
+            self.kodi.ensure_video_source_entry(
+                base / "Movies",
+                source_name=label,
+                sources_xml_path=sources_xml_path,
+            )
+            added.append(label)
+
+        if media_type in ("tvshows", "tv", "all"):
+            label = f"{prov_dir} (TV Shows)"
+            self.kodi.ensure_video_source_entry(
+                base / "TV",
+                source_name=label,
+                sources_xml_path=sources_xml_path,
+            )
+            added.append(label)
+
+        self.kodi.notify(
+            "StreamBridge Sources Added",
+            f"Registered {', '.join(added)} in Video Sources. Press C -> Set content to choose your scraper.",
+        )
+        self.kodi.execute_builtin("ActivateWindow(videos,sources://video/,return)")
+        return added
+
     def launch_provider_login(self, provider_id: str = "netflix") -> bool:
         """Open the provider's official login page inside Kodi as a centered WS_CHILD surface."""
         import subprocess
@@ -323,13 +362,72 @@ def set_app(app: StreamBridgePluginApp | None) -> None:
 
 
 @plugin.route("/")
-def index() -> list[dict[str, str]]:
-    items = [
-        {"label": "Netflix — Movies", "url": "plugin://plugin.video.streambridge/providers/netflix/movies"},
-        {"label": "Netflix — TV Shows", "url": "plugin://plugin.video.streambridge/providers/netflix/tvshows"},
-        {"label": "Sync Netflix Catalog Now", "url": "plugin://plugin.video.streambridge/sync/netflix"},
-        {"label": "Sign In to Netflix", "url": "plugin://plugin.video.streambridge/auth/login/netflix"},
-        {"label": "Clear Isolated Browser Session", "url": "plugin://plugin.video.streambridge/auth/clear"},
+def index() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = [
+        {
+            "label": "Netflix — Movies",
+            "url": "plugin://plugin.video.streambridge/providers/netflix/movies",
+            "context_menu": [
+                (
+                    "Add Netflix (Movies) to Kodi Video Sources & Sync",
+                    "RunPlugin(plugin://plugin.video.streambridge/sources/add/netflix/movies)",
+                ),
+                (
+                    "Add All Netflix Sources (Movies + TV) to Kodi",
+                    "RunPlugin(plugin://plugin.video.streambridge/sources/add/netflix/all)",
+                ),
+                (
+                    "Sync Netflix Catalog Now",
+                    "RunPlugin(plugin://plugin.video.streambridge/sync/netflix)",
+                ),
+                (
+                    "Sign In to Netflix",
+                    "RunPlugin(plugin://plugin.video.streambridge/auth/login/netflix)",
+                ),
+            ],
+        },
+        {
+            "label": "Netflix — TV Shows",
+            "url": "plugin://plugin.video.streambridge/providers/netflix/tvshows",
+            "context_menu": [
+                (
+                    "Add Netflix (TV Shows) to Kodi Video Sources & Sync",
+                    "RunPlugin(plugin://plugin.video.streambridge/sources/add/netflix/tvshows)",
+                ),
+                (
+                    "Add All Netflix Sources (Movies + TV) to Kodi",
+                    "RunPlugin(plugin://plugin.video.streambridge/sources/add/netflix/all)",
+                ),
+                (
+                    "Sync Netflix Catalog Now",
+                    "RunPlugin(plugin://plugin.video.streambridge/sync/netflix)",
+                ),
+                (
+                    "Sign In to Netflix",
+                    "RunPlugin(plugin://plugin.video.streambridge/auth/login/netflix)",
+                ),
+            ],
+        },
+        {
+            "label": "Add Netflix Movies & TV to Kodi Video Sources",
+            "url": "plugin://plugin.video.streambridge/sources/add/netflix/all",
+            "context_menu": [],
+        },
+        {
+            "label": "Sync Netflix Catalog Now",
+            "url": "plugin://plugin.video.streambridge/sync/netflix",
+            "context_menu": [],
+        },
+        {
+            "label": "Sign In to Netflix",
+            "url": "plugin://plugin.video.streambridge/auth/login/netflix",
+            "context_menu": [],
+        },
+        {
+            "label": "Clear Isolated Browser Session",
+            "url": "plugin://plugin.video.streambridge/auth/clear",
+            "context_menu": [],
+        },
     ]
     if IN_KODI:
         import xbmcgui  # type: ignore[import-not-found]
@@ -337,6 +435,8 @@ def index() -> list[dict[str, str]]:
 
         for entry in items:
             li = xbmcgui.ListItem(label=entry["label"], offscreen=True)
+            if entry["context_menu"]:
+                li.addContextMenuItems(entry["context_menu"])
             xbmcplugin.addDirectoryItem(plugin.handle, entry["url"], li, isFolder=True)
         xbmcplugin.endOfDirectory(plugin.handle)
     return items
@@ -386,6 +486,12 @@ def play_query_route() -> PlaybackSessionResult:
     if not id_list:
         raise ValueError("Missing required 'id' query parameter on /play")
     return play_route(id_list[0])
+
+
+@plugin.route("/sources/add/<provider_id>/<media_type>")
+def add_sources_route(provider_id: str, media_type: str) -> list[str]:
+    app = get_app()
+    return app.add_provider_video_sources(provider_id=provider_id, media_type=media_type)
 
 
 @plugin.route("/sync/<provider_id>")

@@ -201,11 +201,21 @@ def test_g1_plugin_routing_and_ecosystem_metadata(tmp_path: Path) -> None:
             encoding="utf-8",
         )
         assert app.kodi.ensure_browseable_source_entry(export_root / "Streaming", sources_xml_path=sources_xml)
+        added_video_sources = app.add_provider_video_sources(
+            provider_id="netflix", media_type="all", sources_xml_path=sources_xml
+        )
+        assert added_video_sources == ["Netflix (Movies)", "Netflix (TV Shows)"]
+
         parsed_sources = ET.parse(sources_xml).getroot()
         video_names = [el.findtext("name") for el in parsed_sources.findall("./video/source")]
         file_names = [el.findtext("name") for el in parsed_sources.findall("./files/source")]
         assert "Movies" in video_names
+        assert "Netflix (Movies)" in video_names
+        assert "Netflix (TV Shows)" in video_names
         assert "StreamBridge Library" in file_names
+
+        root_menu = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/", "1", ""])
+        assert any("Add Netflix (Movies) to Kodi Video Sources & Sync" in cm[0] for cm in root_menu[0]["context_menu"])
     finally:
         plugin_entry.set_app(None)
         store.close()
