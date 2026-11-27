@@ -202,7 +202,10 @@ class KodiBridge:
                 info_tag.setDuration(int(dur_sec))
                 meta["duration"] = int(dur_sec)
             if playback_state:
-                info_tag.setPlayCount(int(playback_state.play_count))
+                if hasattr(info_tag, "setPlaycount"):
+                    info_tag.setPlaycount(int(playback_state.play_count))
+                elif hasattr(info_tag, "setPlayCount"):
+                    info_tag.setPlayCount(int(playback_state.play_count))
                 if playback_state.position_seconds > 0 and not playback_state.completed:
                     info_tag.setResumePoint(
                         float(playback_state.position_seconds),

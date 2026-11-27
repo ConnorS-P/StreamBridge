@@ -136,6 +136,8 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.region = region
         self.sync_runs: list[ReconciliationResult] = []
         self.last_sync_timestamp: float = 0.0
+        self._last_telemetry_poll: float = 0.0
+        self._last_osd_mode: int = -1
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
 
     def _execute_sync(
@@ -272,6 +274,23 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             title.runtime_seconds = int(dur)
             self.store.upsert_title(title)
 
+    def sync_osd_cutout_mode(self) -> None:
+        """Dynamically adjust `StreamBridge.Player` window region (`WM_APP + 4`) when Kodi's OSD is visible."""
+        if not (IN_KODI and xbmc is not None):
+            return
+        full_modal = bool(
+            xbmc.getCondVisibility(
+                "Window.IsVisible(osdvideosettings) | Window.IsVisible(osdaudiosettings) | "
+                "Window.IsVisible(osdsubtitlesettings) | Window.IsVisible(videobookmarks) | "
+                "Window.IsVisible(fullscreeninfo)"
+            )
+        )
+        osd_bar = bool(xbmc.getCondVisibility("Window.IsVisible(videoosd) | Window.IsVisible(seekbar)"))
+        mode = 2 if full_modal else (1 if osd_bar else 0)
+        if mode != self._last_osd_mode:
+            self._last_osd_mode = mode
+            send_player_control("osd_mode", mode)
+
     def run_forever(self) -> None:
         sched = self.kodi.load_sync_schedule_settings()
         if sched.get("sync_on_startup", True):
@@ -279,12 +298,18 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         else:
             self.last_sync_timestamp = time.time()
         while not self.abortRequested():
-            wait_sec = 2.0 if self.kodi.is_playing_video() else 10.0
+            playing = self.kodi.is_playing_video()
+            wait_sec = 0.15 if playing else 10.0
             if self.waitForAbort(wait_sec):
                 break
-            if self.kodi.is_playing_video():
-                self.poll_live_telemetry()
+            if playing:
+                self.sync_osd_cutout_mode()
+                now = time.time()
+                if (now - self._last_telemetry_poll) >= 2.0:
+                    self._last_telemetry_poll = now
+                    self.poll_live_telemetry()
             else:
+                self._last_osd_mode = -1
                 self.run_periodic_sync_if_due()
 
 

@@ -303,25 +303,19 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         case WM_SIZE:
             ResizeWebViewBounds(ctx);
             return 0;
+        case WM_MOUSEACTIVATE:
+            if (ctx && !ctx->is_login_session) {
+                return MA_NOACTIVATE;
+            }
+            break;
         case WM_TIMER:
             if (wparam == 1 && ctx && !ctx->is_login_session) {
                 if (!ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) {
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     return 0;
                 }
-                RECT kodi_screen = {};
-                if (GetWindowRect(ctx->kodi_hwnd, &kodi_screen)) {
-                    int kw = kodi_screen.right - kodi_screen.left;
-                    int kh = kodi_screen.bottom - kodi_screen.top;
-                    EnableKodiChromaKeyCutout(ctx->kodi_hwnd);
-                    SetWindowPos(
-                        hwnd,
-                        ctx->kodi_hwnd,
-                        kodi_screen.left,
-                        kodi_screen.top,
-                        kw,
-                        kh,
-                        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                if (GetForegroundWindow() == hwnd) {
+                    SetForegroundWindow(ctx->kodi_hwnd);
                 }
             }
             return 0;
@@ -344,6 +338,28 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek', " +
                                   std::to_wstring(static_cast<long long>(wparam)) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
+        case WM_APP + 4:
+            if (ctx && !ctx->is_login_session) {
+                RECT rc = {};
+                GetClientRect(hwnd, &rc);
+                int kw = rc.right - rc.left;
+                int kh = rc.bottom - rc.top;
+                if (wparam == 2) {
+                    ShowWindow(hwnd, SW_HIDE);
+                } else if (wparam == 1 && kw > 0 && kh > 0) {
+                    HRGN rgn = CreateRectRgn(
+                        0,
+                        static_cast<int>(kh * 0.14),
+                        kw,
+                        static_cast<int>(kh * 0.68));
+                    SetWindowRgn(hwnd, rgn, TRUE);
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                } else {
+                    SetWindowRgn(hwnd, nullptr, TRUE);
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
             }
             return 0;
         case WM_KEYDOWN:
@@ -472,8 +488,9 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode (Option B): Place chromeless surface on Kodi's monitor directly
-            // underneath Kodi's DWM chroma-keyed HWND so Kodi's native skin OSD ('M' menu) renders on top!
+            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd (so DWM renders it in front
+            // of Kodi's D3D11 swapchain) with WS_EX_NOACTIVATE so Kodi keeps keyboard focus ('M' OSD),
+            // and dynamically apply SetWindowRgn cutouts when Kodi's OSD is visible!
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -482,8 +499,7 @@ bool RunInteractiveWebView2Window(
             win_h = kodi_screen.bottom - kodi_screen.top;
             win_style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN;
             ex_style = WS_EX_NOACTIVATE;
-            EnableKodiChromaKeyCutout(ctx.kodi_hwnd);
-            ctx.kodi_layered_applied = true;
+            parent_hwnd = ctx.kodi_hwnd;
         }
     }
 
@@ -502,9 +518,6 @@ bool RunInteractiveWebView2Window(
         &ctx);
 
     if (!hwnd) {
-        if (ctx.kodi_layered_applied) {
-            DisableKodiChromaKeyCutout(ctx.kodi_hwnd);
-        }
         if (uninit_com) CoUninitialize();
         if (out_error) *out_error = "CreateWindowExW failed";
         return false;
@@ -512,10 +525,11 @@ bool RunInteractiveWebView2Window(
     ctx.main_hwnd = hwnd;
 
     if (!is_login_session && ctx.kodi_hwnd) {
-        // Place the video underlay directly behind kodi_hwnd in Z-order and keep Kodi focused
-        SetWindowPos(hwnd, ctx.kodi_hwnd, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        // Keep owned popup in front of kodi_hwnd without stealing keyboard focus from Kodi
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetForegroundWindow(ctx.kodi_hwnd);
-        SetTimer(hwnd, 1, 400, nullptr);
+        SetTimer(hwnd, 1, 150, nullptr);
     } else {
         ShowCursor(TRUE);
         ShowWindow(hwnd, SW_SHOW);
