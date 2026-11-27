@@ -54,6 +54,21 @@ jobs:
             Copy-Item -Force $_.FullName "release_assets/"
           }
 
+      - name: Create GitHub Release on version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $TagName = "${{ github.ref_name }}"
+          $Files = Get-ChildItem -Path "release_assets/*" | Select-Object -ExpandProperty FullName
+          gh release view $TagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $TagName $Files --clobber
+          } else {
+            gh release create $TagName $Files --title "StreamBridge $TagName" --generate-notes
+          }
+
       - name: Publish static Kodi repository to repo branch
         shell: bash
         run: |
@@ -68,12 +83,3 @@ jobs:
           git add -f repo repository.streambridge.zip
           git commit -m "Publish Kodi repository artifacts (${GITHUB_SHA::7})"
           git push origin HEAD:refs/heads/repo --force
-
-      - name: Create GitHub Release on version tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $TagName = "${{ github.ref_name }}"
-          gh release create $TagName release_assets/* --title "StreamBridge $TagName" --generate-notes --clobber
