@@ -26,6 +26,7 @@ where = ["addons/script.module.streambridge/lib"]
 
 [tool.pytest.ini_options]
 pythonpath = [
+    ".",
     "addons/script.module.streambridge/lib",
     "addons/plugin.video.streambridge",
     "addons/service.streambridge",
