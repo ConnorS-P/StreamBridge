@@ -255,7 +255,6 @@ class StreamBridgePluginApp:
         base = self.export_root / "Streaming" / prov_dir
         added: list[str] = []
         any_xml_modified = False
-        any_missing_in_memory = False
 
         if media_type in ("movies", "all"):
             label = f"{prov_dir} (Movies)"
@@ -266,8 +265,6 @@ class StreamBridgePluginApp:
                 sources_xml_path=sources_xml_path,
             ):
                 any_xml_modified = True
-            if not self.rpc.is_video_source_loaded_in_kodi(movies_dir):
-                any_missing_in_memory = True
             added.append(label)
 
         if media_type in ("tvshows", "tv", "all"):
@@ -279,20 +276,30 @@ class StreamBridgePluginApp:
                 sources_xml_path=sources_xml_path,
             ):
                 any_xml_modified = True
-            if not self.rpc.is_video_source_loaded_in_kodi(tv_dir):
-                any_missing_in_memory = True
             added.append(label)
 
-        # Only trigger LoadProfile when sources.xml was modified or not yet loaded in Kodi's memory
-        if any_xml_modified or any_missing_in_memory:
-            profile_label = self.rpc.reload_current_profile()
-            self.kodi.execute_builtin(f"LoadProfile({profile_label})")
+        # 1. Navigate out of `plugin://plugin.video.streambridge/` to `sources://video/` FIRST
+        #    so Kodi's MyVideoNav window is no longer pointing at a plugin:// URL during profile reload.
+        if IN_KODI:
+            import xbmc  # type: ignore[import-not-found]
+            import xbmcgui  # type: ignore[import-not-found]
 
-        self.kodi.execute_builtin('ActivateWindow(videos,"sources://video/",return)')
-        self.kodi.execute_builtin("Container.Refresh")
+            if xbmcgui.getCurrentWindowId() == 10025:
+                self.kodi.execute_builtin("Container.Update(sources://video/,replace)")
+            else:
+                self.kodi.execute_builtin("ActivateWindow(videos,sources://video/,return)")
+
+            # 2. If sources.xml was modified on disk, call Profiles.LoadProfile ONCE (never twice!)
+            #    after a brief pause for Container.Update to leave the plugin directory, then refresh.
+            if any_xml_modified:
+                xbmc.sleep(250)
+                self.rpc.reload_current_profile()
+                xbmc.sleep(250)
+                self.kodi.execute_builtin("Container.Refresh")
+
         self.kodi.notify(
-            "StreamBridge Sources Ready",
-            f"Verified {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
+            "StreamBridge Sources Added",
+            f"Added {', '.join(added)}. Press C -> Set content on each folder to choose your scraper.",
         )
         return added
 
