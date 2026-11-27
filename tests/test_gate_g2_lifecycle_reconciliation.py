@@ -151,4 +151,30 @@ def test_g2_service_monitor_coalesces_scans_and_prevents_self_trigger_loops(tmp_
     assert len(service.sync_runs) == 1
     service.onScanFinished("video")
     assert len(rpc_calls) == 1
+
+    # Verify periodic background sync interval & playback deferral
+    service.last_sync_timestamp = 1000.0
+    service.kodi.sync_schedule_overrides = {
+        "periodic_sync_enabled": True,
+        "periodic_sync_interval_hours": 6,
+        "pause_sync_during_playback": True,
+    }
+    # Not due yet (only 1 hour elapsed out of 6 hours)
+    assert service.run_periodic_sync_if_due(now=1000.0 + 3600.0) is None
+    assert len(service.sync_runs) == 1
+
+    # Due (6 hours elapsed), but video playback is active -> deferred!
+    service.kodi.playing_video = True
+    assert service.run_periodic_sync_if_due(now=1000.0 + 6 * 3600.0 + 10.0) is None
+    assert len(service.sync_runs) == 1
+
+    # Playback stops -> periodic sync executes immediately on next tick!
+    service.kodi.playing_video = False
+    res_periodic = service.run_periodic_sync_if_due(now=1000.0 + 6 * 3600.0 + 20.0)
+    assert res_periodic is not None
+    assert len(service.sync_runs) == 2
+
+    # User updates StreamBridge Settings -> onSettingsChanged triggers immediate reconciliation
+    service.onSettingsChanged()
+    assert len(service.sync_runs) == 3
     store.close()

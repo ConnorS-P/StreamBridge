@@ -10,6 +10,7 @@ Responsibilities (Section 1 & Section 3 of Design v0.1):
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from streambridge_core.adapters.base import ProviderAdapter
 from streambridge_core.adapters.fixture import FixtureAdapter
@@ -122,20 +123,66 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             self.adapter = FixtureAdapter(self.store, fixture_path=default_fixture)
         self.region = region
         self.sync_runs: list[ReconciliationResult] = []
+        self.last_sync_timestamp: float = 0.0
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
 
-    def run_startup_sync(self) -> ReconciliationResult:
-        """Perform initial provider reconciliation on service startup."""
+    def _execute_sync(
+        self,
+        region: str | None = None,
+        now: float | None = None,
+    ) -> ReconciliationResult:
+        """Run a full catalog + My List reconciliation pass and request targeted Kodi scan/clean."""
+        target_region = region or self.region
         policy = self.kodi.load_filter_policy()
         result = self.reconciler.reconcile_provider(
-            self.adapter, region=self.region, filter_policy=policy
+            self.adapter, region=target_region, filter_policy=policy
         )
         self.sync_runs.append(result)
+        self.last_sync_timestamp = now if now is not None else time.time()
+
+        mylist_titles = [
+            t for t in self.store.list_titles(provider="netflix", available_only=True)
+            if t.in_my_list
+        ]
+        if mylist_titles:
+            self.rpc.sync_mylist_to_kodi_favourites(mylist_titles)
+
         if result.requires_kodi_scan:
             self.rpc.request_targeted_scan()
         if result.requires_kodi_clean:
             self.rpc.request_targeted_clean()
         return result
+
+    def run_startup_sync(self, now: float | None = None) -> ReconciliationResult:
+        """Perform initial provider reconciliation on service startup."""
+        return self._execute_sync(now=now)
+
+    def run_periodic_sync_if_due(self, now: float | None = None) -> ReconciliationResult | None:
+        """Run a periodic background sync if enabled, due by interval, and not blocked by playback."""
+        sched = self.kodi.load_sync_schedule_settings()
+        if not sched.get("periodic_sync_enabled", True):
+            return None
+        if sched.get("pause_sync_during_playback", True) and self.kodi.is_playing_video():
+            return None
+
+        current_time = now if now is not None else time.time()
+        interval_hours = max(1, int(sched.get("periodic_sync_interval_hours", 6)))
+        interval_seconds = float(interval_hours) * 3600.0
+        if self.last_sync_timestamp > 0 and (current_time - self.last_sync_timestamp) < interval_seconds:
+            return None
+
+        return self._execute_sync(
+            region=str(sched.get("region") or self.region),
+            now=current_time,
+        )
+
+    def onSettingsChanged(self) -> None:
+        """Triggered by Kodi when the user saves changes in StreamBridge Settings."""
+        if self.kodi.is_playing_video():
+            return
+        sched = self.kodi.load_sync_schedule_settings()
+        self.region = str(sched.get("region") or self.region)
+        self._execute_sync(region=self.region)
 
     def onScanStarted(self, library: str = "video") -> None:
         """Triggered by Kodi when a library scan begins."""
@@ -146,16 +193,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             # Guard against self-triggered scan loops
             return
 
-        policy = self.kodi.load_filter_policy()
-        result = self.reconciler.reconcile_provider(
-            self.adapter, region=self.region, filter_policy=policy
-        )
-        self.sync_runs.append(result)
-        if result.requires_kodi_scan:
-            # Since `_kodi_scanning` is True, this queues `_pending_followup_scan`
-            self.rpc.request_targeted_scan()
-        if result.requires_kodi_clean:
-            self.rpc.request_targeted_clean()
+        self._execute_sync()
 
     def onScanFinished(self, library: str = "video") -> None:
         """Triggered by Kodi when a library scan finishes."""
@@ -178,10 +216,15 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.kodi.log("Video library clean finished", level="info")
 
     def run_forever(self) -> None:
-        self.run_startup_sync()
+        sched = self.kodi.load_sync_schedule_settings()
+        if sched.get("sync_on_startup", True):
+            self.run_startup_sync()
+        else:
+            self.last_sync_timestamp = time.time()
         while not self.abortRequested():
             if self.waitForAbort(10.0):
                 break
+            self.run_periodic_sync_if_due()
 
 
 if __name__ == "__main__":

@@ -54,6 +54,8 @@ class KodiBridge:
         self.notifications: list[tuple[str, str]] = []
         self.executed_builtins: list[str] = []
         self.audio_suspended: bool = False
+        self.playing_video: bool = False
+        self.sync_schedule_overrides: dict[str, Any] = {}
 
     def log(self, message: str, level: str = "info") -> None:
         sanitized = f"[StreamBridge] {redact_secrets(message)}"
@@ -537,3 +539,42 @@ class KodiBridge:
             return LibraryFilterPolicy.from_kodi_settings(settings_dict)
         except Exception:
             return LibraryFilterPolicy.permissive_default()
+
+    def is_playing_video(self) -> bool:
+        """Return `True` if Kodi is currently playing video (used to defer background catalog syncs)."""
+        if IN_KODI and xbmc is not None:
+            try:
+                return bool(xbmc.Player().isPlayingVideo() or xbmc.getCondVisibility("Player.HasVideo"))
+            except Exception:
+                return False
+        return self.playing_video
+
+    def load_sync_schedule_settings(self) -> dict[str, Any]:
+        """Load startup & periodic catalog sync schedule settings from Kodi add-on settings."""
+        defaults: dict[str, Any] = {
+            "sync_on_startup": True,
+            "periodic_sync_enabled": True,
+            "periodic_sync_interval_hours": 6,
+            "pause_sync_during_playback": True,
+            "region": "US",
+        }
+        if self.sync_schedule_overrides:
+            merged = dict(defaults)
+            merged.update(self.sync_schedule_overrides)
+            return merged
+        if not (IN_KODI and xbmcaddon is not None):
+            return defaults
+        try:
+            addon = xbmcaddon.Addon("plugin.video.streambridge")
+            interval_hours = addon.getSettingInt("periodic_sync_interval_hours")
+            if interval_hours <= 0:
+                interval_hours = 6
+            return {
+                "sync_on_startup": addon.getSettingBool("sync_on_startup"),
+                "periodic_sync_enabled": addon.getSettingBool("periodic_sync_enabled"),
+                "periodic_sync_interval_hours": interval_hours,
+                "pause_sync_during_playback": addon.getSettingBool("pause_sync_during_playback"),
+                "region": addon.getSettingString("region") or "US",
+            }
+        except Exception:
+            return defaults
