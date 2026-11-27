@@ -25,7 +25,7 @@ void PrintDiagnosticsJson() {
     auto mf_report = streambridge::ProbeMediaFoundationAndDisplays();
 
     std::cout << "{\n"
-              << "  \"player_version\": \"0.1.0\",\n"
+              << "  \"player_version\": \"0.1.5\",\n"
               << "  \"wasapi_audio\": " << streambridge::FormatWasapiReportJson(wasapi_report) << ",\n"
               << "  \"media_foundation_and_display\": "
               << streambridge::FormatMediaFoundationReportJson(mf_report) << "\n"
@@ -72,6 +72,8 @@ int RunSelfTest() {
 
 int main(int argc, char* argv[]) {
     std::wstring pipe_name = L"\\\\.\\pipe\\StreamBridgePlayer";
+    std::string login_url;
+    std::string watch_url;
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
@@ -86,6 +88,10 @@ int main(int argc, char* argv[]) {
             dry_run = true;
         } else if (arg == "--pipe" && i + 1 < argc) {
             pipe_name = Utf8ToWide(argv[++i]);
+        } else if (arg == "--login" && i + 1 < argc) {
+            login_url = argv[++i];
+        } else if (arg == "--watch" && i + 1 < argc) {
+            watch_url = argv[++i];
         }
     }
 
@@ -95,6 +101,24 @@ int main(int argc, char* argv[]) {
 
     if (diagnose_only) {
         PrintDiagnosticsJson();
+        return 0;
+    }
+
+    if (!login_url.empty()) {
+        std::string err;
+        if (!streambridge::RunInteractiveWebView2Window(login_url, true, nullptr, &err)) {
+            std::cerr << "StreamBridge.Player login window error: " << err << "\n";
+            return 1;
+        }
+        return 0;
+    }
+
+    if (!watch_url.empty()) {
+        std::string err;
+        if (!streambridge::RunInteractiveWebView2Window(watch_url, false, nullptr, &err)) {
+            std::cerr << "StreamBridge.Player watch window error: " << err << "\n";
+            return 1;
+        }
         return 0;
     }
 

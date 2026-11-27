@@ -132,11 +132,14 @@ class StreamBridgePluginApp:
             / "providers"
             / "netflix_sample_catalog.json"
         )
+        bundled_player = Path(__file__).resolve().parent / "bin" / "StreamBridge.Player.exe"
+        self.companion_exe_path = bundled_player if bundled_player.exists() else None
         self.adapter = adapter or FixtureAdapter(self.store, fixture_path=default_fixture)
         self.broker = broker or PlaybackBroker(
             store=self.store,
             kodi_bridge=self.kodi,
             kodi_rpc=self.rpc,
+            companion_exe_path=self.companion_exe_path,
         )
 
     def build_adapter(
@@ -202,18 +205,31 @@ class StreamBridgePluginApp:
         return cleared
 
     def launch_provider_login(self, provider_id: str = "netflix") -> bool:
-        """Open the provider's official login page inside the isolated DPAPI browser profile."""
-        from streambridge_core.platform_compat import detect_platform_environment
+        """Open the provider's official login page inside StreamBridge.Player's native WebView2 host."""
         import subprocess
+
+        from streambridge_core.platform_compat import detect_platform_environment
 
         login_url = validate_launch_url("https://www.netflix.com/login", provider=provider_id)
         profile_dir = get_isolated_browser_profile_dir()
-        env = detect_platform_environment(provider_id=provider_id)
 
+        if self.companion_exe_path and self.companion_exe_path.exists():
+            self.kodi.notify(
+                "StreamBridge Login",
+                "Opening Netflix Sign-In window. Click 'Return to Kodi' or press ESC when done.",
+            )
+            subprocess.Popen(
+                [str(self.companion_exe_path), "--login", login_url],
+                shell=False,
+                close_fds=True,
+            )
+            return True
+
+        env = detect_platform_environment(provider_id=provider_id)
         if not env.desktop_browser_cmd:
             self.kodi.notify(
                 "StreamBridge Login",
-                "No desktop browser (Microsoft Edge / Chromium) found to open login session.",
+                "No playback host or desktop browser found to open login session.",
                 error=True,
             )
             return False
@@ -232,14 +248,12 @@ class StreamBridgePluginApp:
 
         self.kodi.notify(
             "StreamBridge Login",
-            "Opening Netflix login. Sign in, select your profile, then close the window (Alt+F4).",
+            "Opening Netflix login in browser.",
         )
         subprocess.Popen(
             args,
             shell=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            close_fds=True,
         )
         return True
 

@@ -102,6 +102,26 @@ class PlaybackBroker:
             if self.ipc_client is not None and (env.is_windows or self.ipc_client.tcp_fallback is not None):
                 return self._run_ipc_session(descriptor, profile=profile)
 
+            if env.has_native_companion_exe and env.companion_exe_path is not None:
+                import subprocess
+
+                proc = subprocess.Popen(
+                    [str(env.companion_exe_path), "--watch", descriptor.launch_url],
+                    shell=False,
+                    close_fds=True,
+                )
+                proc.wait()
+                events = make_unverified_browser_events(descriptor, backend_name="webview2_native_host")
+                return PlaybackSessionResult(
+                    session_id=descriptor.session_id,
+                    title_id=descriptor.title_id,
+                    backend_used="webview2_native_host",
+                    final_state=PlaybackSessionState.STOPPED,
+                    telemetry_verified=False,
+                    events=events,
+                    persisted_state=None,
+                )
+
             return self._run_fallback_session(descriptor, env=env, profile=profile)
         finally:
             self.kodi.restore_kodi_audio_and_focus()

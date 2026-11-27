@@ -88,18 +88,28 @@ def detect_platform_environment(
 
 
 def _find_desktop_browser(os_family: str) -> list[str] | None:
-    """Locate an installed browser binary without using `shell=True`."""
+    """Locate an installed browser binary without using `shell=True`.
+
+    On Windows, prefers `msedge_IFEO.exe` if MSEdgeRedirect is installed (which otherwise
+    intercepts `msedge.exe` via Image File Execution Options and drops `--app` arguments),
+    or falls back to `msedge.exe` / `chrome.exe`.
+    """
     if os_family == "windows":
         candidates = [
+            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge_IFEO.exe"),
+            Path(r"C:\Program Files\Microsoft\Edge\Application\msedge_IFEO.exe"),
+            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
             Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
             Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
         ]
         for cand in candidates:
             if cand.exists():
                 return [str(cand)]
-        which_edge = shutil.which("msedge")
-        if which_edge:
-            return [which_edge]
+        for name in ("chrome", "msedge"):
+            found_bin = shutil.which(name)
+            if found_bin:
+                return [found_bin]
         return None
 
     if os_family == "macos":
@@ -194,9 +204,7 @@ def launch_browser_process(
     return popen_factory(
         args,
         shell=False,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        close_fds=True,
     )
 
 

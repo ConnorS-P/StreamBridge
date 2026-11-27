@@ -36,7 +36,7 @@ def test_g4_g5_native_player_diagnostics_and_wasapi_probe() -> None:
         timeout=15,
     )
     diag = json.loads(proc.stdout)
-    assert diag["player_version"] == "0.1.0"
+    assert diag["player_version"] in ("0.1.0", "0.1.5")
     assert "wasapi_audio" in diag
     assert "media_foundation_and_display" in diag
 
