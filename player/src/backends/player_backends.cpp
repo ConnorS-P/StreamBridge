@@ -160,10 +160,33 @@ bool IsPostLoginUrl(const std::wstring& uri) {
 }
 
 void ResizeWebViewBounds(WebViewHostContext* ctx) {
-    if (!ctx || !ctx->main_hwnd || !ctx->controller) return;
-    RECT rc = {};
-    GetClientRect(ctx->main_hwnd, &rc);
-    ctx->controller->put_Bounds(rc);
+    if (!ctx || !ctx->main_hwnd) return;
+    if (ctx->is_login_session && ctx->kodi_hwnd && IsWindow(ctx->kodi_hwnd)) {
+        RECT kodi_client = {};
+        if (GetClientRect(ctx->kodi_hwnd, &kodi_client)) {
+            int kw = kodi_client.right - kodi_client.left;
+            int kh = kodi_client.bottom - kodi_client.top;
+            if (kw > 0 && kh > 0) {
+                int win_w = static_cast<int>(kw * 0.82);
+                int win_h = static_cast<int>(kh * 0.82);
+                int pos_x = (kw - win_w) / 2;
+                int pos_y = (kh - win_h) / 2;
+                SetWindowPos(
+                    ctx->main_hwnd,
+                    HWND_TOP,
+                    pos_x,
+                    pos_y,
+                    win_w,
+                    win_h,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            }
+        }
+    }
+    if (ctx->controller) {
+        RECT rc = {};
+        GetClientRect(ctx->main_hwnd, &rc);
+        ctx->controller->put_Bounds(rc);
+    }
 }
 
 LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {

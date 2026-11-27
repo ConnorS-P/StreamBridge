@@ -71,6 +71,10 @@ int RunSelfTest() {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    // Match Kodi's Per-Monitor V2 DPI awareness so GetClientRect/GetWindowRect on kodi_hwnd
+    // return exact physical pixel coordinates across multi-monitor setups without DPI virtualization.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     std::wstring pipe_name = L"\\\\.\\pipe\\StreamBridgePlayer";
     std::string login_url;
     std::string watch_url;
@@ -105,18 +109,18 @@ int main(int argc, char* argv[]) {
     }
 
     if (!login_url.empty()) {
+        FreeConsole();
         std::string err;
         if (!streambridge::RunInteractiveWebView2Window(login_url, true, nullptr, &err)) {
-            std::cerr << "StreamBridge.Player login window error: " << err << "\n";
             return 1;
         }
         return 0;
     }
 
     if (!watch_url.empty()) {
+        FreeConsole();
         std::string err;
         if (!streambridge::RunInteractiveWebView2Window(watch_url, false, nullptr, &err)) {
-            std::cerr << "StreamBridge.Player watch window error: " << err << "\n";
             return 1;
         }
         return 0;

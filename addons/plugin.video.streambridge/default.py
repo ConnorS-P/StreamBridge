@@ -223,16 +223,17 @@ class StreamBridgePluginApp:
         profile_dir = get_isolated_browser_profile_dir()
 
         if self.companion_exe_path and self.companion_exe_path.exists():
+            no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
             if IN_KODI:
                 import xbmc  # type: ignore[import-not-found]
                 import xbmcgui  # type: ignore[import-not-found]
 
                 dlg = xbmcgui.WindowDialog()
                 header = xbmcgui.ControlLabel(
-                    x=160,
-                    y=30,
-                    width=1600,
-                    height=50,
+                    x=0,
+                    y=18,
+                    width=1280,
+                    height=40,
                     label="StreamBridge Netflix Sign-In — Closes automatically once signed in (or press ESC / Back)",
                     alignment=2,
                 )
@@ -243,6 +244,7 @@ class StreamBridgePluginApp:
                         [str(self.companion_exe_path), "--login", login_url],
                         shell=False,
                         close_fds=True,
+                        creationflags=no_win_flag,
                     )
                     while proc.poll() is None and not xbmc.Monitor().abortRequested():
                         xbmc.sleep(150)
@@ -255,6 +257,7 @@ class StreamBridgePluginApp:
                 [str(self.companion_exe_path), "--login", login_url],
                 shell=False,
                 close_fds=True,
+                creationflags=no_win_flag,
             )
             return True
 

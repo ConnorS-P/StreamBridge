@@ -134,11 +134,13 @@ class PlaybackBroker:
                 )
                 self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
                 enable_kodi_osd_cutout()
+                no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0
                 try:
                     proc = subprocess.Popen(
                         [str(env.companion_exe_path), "--watch", descriptor.launch_url],
                         shell=False,
                         close_fds=True,
+                        creationflags=no_win_flag,
                     )
                     proc.wait()
                 finally:
