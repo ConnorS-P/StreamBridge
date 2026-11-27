@@ -768,8 +768,11 @@ class NetflixCatalogAdapter(ProviderAdapter):
             raise LookupError(f"No Netflix offer found for title_id: {title_id}")
 
         offer = offers[0]
+        raw_launch = offer.launch_url
+        if "netflix.com/title/" in raw_launch:
+            raw_launch = raw_launch.replace("netflix.com/title/", "netflix.com/watch/")
         validated_url = validate_launch_url(
-            offer.launch_url,
+            raw_launch,
             provider=self.provider_id,
             allowed_hosts=self.descriptor.allowed_hosts,
         )

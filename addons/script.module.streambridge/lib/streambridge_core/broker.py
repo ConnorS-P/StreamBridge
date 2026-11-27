@@ -28,11 +28,7 @@ from .models import (
     PlaybackState,
     SessionEvent,
 )
-from .osd_overlay import (
-    disable_kodi_osd_cutout,
-    enable_kodi_osd_cutout,
-    generate_chroma_key_avi,
-)
+from .osd_overlay import generate_chroma_key_avi
 from .platform_compat import (
     PlatformEnvironment,
     build_non_windows_fallback_plan,
@@ -130,21 +126,17 @@ class PlaybackBroker:
 
                 proxy_avi = generate_chroma_key_avi(
                     self.kodi.get_profile_dir() / "osd_proxy_key.avi",
-                    duration_seconds=120,
+                    duration_seconds=1,
                 )
                 self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
-                enable_kodi_osd_cutout()
                 no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0
-                try:
-                    proc = subprocess.Popen(
-                        [str(env.companion_exe_path), "--watch", descriptor.launch_url],
-                        shell=False,
-                        close_fds=True,
-                        creationflags=no_win_flag,
-                    )
-                    proc.wait()
-                finally:
-                    disable_kodi_osd_cutout()
+                proc = subprocess.Popen(
+                    [str(env.companion_exe_path), "--watch", descriptor.launch_url],
+                    shell=False,
+                    close_fds=True,
+                    creationflags=no_win_flag,
+                )
+                proc.wait()
                 events = make_unverified_browser_events(descriptor, backend_name="webview2_native_host")
                 return PlaybackSessionResult(
                     session_id=descriptor.session_id,

@@ -523,7 +523,19 @@ def browse_provider_filtered(provider_id: str, media_filter: str) -> list[dict[s
 @plugin.route("/play/<title_id>")
 def play_route(title_id: str) -> PlaybackSessionResult:
     app = get_app()
-    return app.play(title_id=title_id)
+    result = app.play(title_id=title_id)
+    if IN_KODI and plugin.handle >= 0:
+        import xbmcgui  # type: ignore[import-not-found]
+        import xbmcplugin  # type: ignore[import-not-found]
+        from streambridge_core.osd_overlay import generate_chroma_key_avi
+
+        proxy_avi = generate_chroma_key_avi(
+            app.kodi.get_profile_dir() / "osd_proxy_key.avi",
+            duration_seconds=1,
+        )
+        li = xbmcgui.ListItem(path=str(proxy_avi))
+        xbmcplugin.setResolvedUrl(plugin.handle, True, li)
+    return result
 
 
 @plugin.route("/play")

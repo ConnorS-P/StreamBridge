@@ -101,16 +101,7 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
 
     const style = document.createElement('style');
     style.textContent = `
-        .watch-video--bottom-controls-container,
-        .watch-video--back-container,
-        .watch-video--flag-container,
-        .evidence-overlay,
-        .PlayerControlsNeo__layout,
-        .nf-player-container .controls {
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }
-        body { cursor: none !important; overflow: hidden !important; }
+        body { overflow: hidden !important; background-color: #000 !important; }
     `;
     if (document.head) {
         document.head.appendChild(style);
@@ -159,6 +150,7 @@ struct WebViewHostContext {
     std::wstring initial_url;
     bool is_login_session = false;
     bool kodi_layered_applied = false;
+    bool entered_watch_page = false;
     std::function<void(const std::string& state, double pos, double dur)> on_state_change;
 };
 
@@ -339,8 +331,16 @@ bool RunInteractiveWebView2Window(
     HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool uninit_com = SUCCEEDED(hr_com);
 
+    std::string effective_url = target_url;
+    if (!is_login_session) {
+        size_t title_pos = effective_url.find("netflix.com/title/");
+        if (title_pos != std::string::npos) {
+            effective_url.replace(title_pos, 18, "netflix.com/watch/");
+        }
+    }
+
     WebViewHostContext ctx;
-    ctx.initial_url = Utf8ToWide(target_url);
+    ctx.initial_url = Utf8ToWide(effective_url);
     ctx.is_login_session = is_login_session;
     ctx.on_state_change = on_state_change;
     ctx.kodi_hwnd = FindKodiWindowHandle();
@@ -380,8 +380,8 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode (Option B): Place chromeless surface on Kodi's monitor directly
-            // underneath Kodi's DWM chroma-keyed HWND so Kodi's native skin OSD renders on top!
+            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd at Kodi's exact monitor rect
+            // so Windows DWM renders the PlayReady surface directly over Kodi's window with independent input focus.
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -389,9 +389,7 @@ bool RunInteractiveWebView2Window(
             win_w = kodi_screen.right - kodi_screen.left;
             win_h = kodi_screen.bottom - kodi_screen.top;
             win_style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN;
-            ex_style = WS_EX_NOACTIVATE;
-            EnableKodiChromaKeyCutout(ctx.kodi_hwnd);
-            ctx.kodi_layered_applied = true;
+            parent_hwnd = ctx.kodi_hwnd;
         }
     }
 
@@ -410,24 +408,17 @@ bool RunInteractiveWebView2Window(
         &ctx);
 
     if (!hwnd) {
-        if (ctx.kodi_layered_applied) {
-            DisableKodiChromaKeyCutout(ctx.kodi_hwnd);
-        }
         if (uninit_com) CoUninitialize();
         if (out_error) *out_error = "CreateWindowExW failed";
         return false;
     }
     ctx.main_hwnd = hwnd;
 
-    if (!is_login_session && ctx.kodi_hwnd) {
-        // Place the video underlay directly behind kodi_hwnd in Z-order and keep Kodi focused
-        SetWindowPos(hwnd, ctx.kodi_hwnd, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        SetForegroundWindow(ctx.kodi_hwnd);
-    } else {
-        ShowCursor(TRUE);
-        ShowWindow(hwnd, SW_SHOW);
-        SetFocus(hwnd);
-    }
+    ShowCursor(TRUE);
+    ShowWindow(hwnd, SW_SHOW);
+    SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_SHOWWINDOW);
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
 
     std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
     if (ctx.on_state_change) {
@@ -457,11 +448,9 @@ bool RunInteractiveWebView2Window(
 
                             ResizeWebViewBounds(&ctx);
                             controller->put_IsVisible(TRUE);
-                            if (ctx.is_login_session) {
-                                controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-                            }
+                            controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 
-                            // Intercept ESC, Browser Back, and Media Stop
+                            // Intercept ESC, Browser Back, Media Stop (and Backspace in playback mode)
                             EventRegistrationToken accel_token = {};
                             controller->add_AcceleratorKeyPressed(
                                 Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
@@ -474,7 +463,8 @@ bool RunInteractiveWebView2Window(
                                         args->get_VirtualKey(&key);
                                         if (kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN &&
                                             (key == VK_ESCAPE || key == VK_BROWSER_BACK ||
-                                             key == VK_MEDIA_STOP)) {
+                                             key == VK_MEDIA_STOP ||
+                                             (!ctx.is_login_session && key == VK_BACK))) {
                                             args->put_Handled(TRUE);
                                             PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
                                         }
@@ -510,9 +500,32 @@ bool RunInteractiveWebView2Window(
                                         .Get(),
                                     &src_token);
                             } else {
-                                // Playback Mode: Inject CSS to hide Netflix web chrome & wire <video> telemetry
+                                // Playback Mode: Wire <video> telemetry & auto-close if user clicks Netflix's Back arrow
                                 ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                     kNetflixTelemetryAndOsdHideScript, nullptr);
+
+                                EventRegistrationToken src_token = {};
+                                ctx.webview->add_SourceChanged(
+                                    Callback<ICoreWebView2SourceChangedEventHandler>(
+                                        [&ctx](
+                                            ICoreWebView2* sender,
+                                            ICoreWebView2SourceChangedEventArgs* /*args*/) -> HRESULT {
+                                            LPWSTR uri = nullptr;
+                                            if (SUCCEEDED(sender->get_Source(&uri)) && uri) {
+                                                std::wstring current_uri(uri);
+                                                CoTaskMemFree(uri);
+                                                if (current_uri.find(L"netflix.com/watch/") != std::wstring::npos) {
+                                                    ctx.entered_watch_page = true;
+                                                } else if (ctx.entered_watch_page &&
+                                                           (current_uri.find(L"netflix.com/browse") != std::wstring::npos ||
+                                                            current_uri.find(L"netflix.com/title/") != std::wstring::npos)) {
+                                                    PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                                }
+                                            }
+                                            return S_OK;
+                                        })
+                                        .Get(),
+                                    &src_token);
 
                                 EventRegistrationToken msg_token = {};
                                 ctx.webview->add_WebMessageReceived(
