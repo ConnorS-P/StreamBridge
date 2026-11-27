@@ -68,7 +68,10 @@ class StreamBridgeServiceMonitor(_BaseMonitor):
 
     def run_startup_sync(self) -> ReconciliationResult:
         """Perform initial provider reconciliation on service startup."""
-        result = self.reconciler.reconcile_provider(self.adapter, region=self.region)
+        policy = self.kodi.load_filter_policy()
+        result = self.reconciler.reconcile_provider(
+            self.adapter, region=self.region, filter_policy=policy
+        )
         self.sync_runs.append(result)
         if result.requires_kodi_scan:
             self.rpc.request_targeted_scan()
@@ -85,7 +88,10 @@ class StreamBridgeServiceMonitor(_BaseMonitor):
             # Guard against self-triggered scan loops
             return
 
-        result = self.reconciler.reconcile_provider(self.adapter, region=self.region)
+        policy = self.kodi.load_filter_policy()
+        result = self.reconciler.reconcile_provider(
+            self.adapter, region=self.region, filter_policy=policy
+        )
         self.sync_runs.append(result)
         if result.requires_kodi_scan:
             # Since `_kodi_scanning` is True, this queues `_pending_followup_scan`

@@ -10,6 +10,7 @@ Architecture rules:
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 from pathlib import Path
 import sqlite3
 import threading
@@ -28,7 +29,7 @@ from .models import (
     Title,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -52,6 +53,11 @@ CREATE TABLE IF NOT EXISTS titles (
     premiered TEXT,
     plot TEXT,
     is_aired INTEGER NOT NULL DEFAULT 1,
+    original_language TEXT NOT NULL DEFAULT 'en',
+    is_dubbed INTEGER NOT NULL DEFAULT 0,
+    content_rating TEXT,
+    user_rating REAL,
+    genres_json TEXT NOT NULL DEFAULT '[]',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -176,6 +182,20 @@ class StreamBridgeStore:
     def _initialize_schema(self) -> None:
         with self.transaction() as conn:
             conn.executescript(_SCHEMA_SQL)
+            existing_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(titles)").fetchall()
+            }
+            migrations = [
+                ("original_language", "ALTER TABLE titles ADD COLUMN original_language TEXT NOT NULL DEFAULT 'en'"),
+                ("is_dubbed", "ALTER TABLE titles ADD COLUMN is_dubbed INTEGER NOT NULL DEFAULT 0"),
+                ("content_rating", "ALTER TABLE titles ADD COLUMN content_rating TEXT"),
+                ("user_rating", "ALTER TABLE titles ADD COLUMN user_rating REAL"),
+                ("genres_json", "ALTER TABLE titles ADD COLUMN genres_json TEXT NOT NULL DEFAULT '[]'"),
+            ]
+            for col_name, ddl in migrations:
+                if col_name not in existing_cols:
+                    conn.execute(ddl)
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -199,6 +219,7 @@ class StreamBridgeStore:
         ).fetchone()
 
         now = time.time()
+        genres_json = json.dumps(list(title.genres or ()))
         if existing:
             title.title_id = existing["title_id"]
             title.created_at = existing["created_at"]
@@ -220,6 +241,11 @@ class StreamBridgeStore:
                     premiered = COALESCE(?, premiered),
                     plot = COALESCE(?, plot),
                     is_aired = ?,
+                    original_language = ?,
+                    is_dubbed = ?,
+                    content_rating = COALESCE(?, content_rating),
+                    user_rating = COALESCE(?, user_rating),
+                    genres_json = ?,
                     updated_at = ?
                 WHERE title_id = ?
                 """,
@@ -238,6 +264,11 @@ class StreamBridgeStore:
                     title.premiered,
                     title.plot,
                     1 if title.is_aired else 0,
+                    title.original_language or "en",
+                    1 if title.is_dubbed else 0,
+                    title.content_rating,
+                    title.user_rating,
+                    genres_json,
                     now,
                     title.title_id,
                 ),
@@ -248,8 +279,9 @@ class StreamBridgeStore:
                 INSERT INTO titles (
                     title_id, canonical_key, media_type, title, year,
                     tmdb_id, imdb_id, parent_show_id, show_title, season, episode,
-                    edition, premiered, plot, is_aired, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    edition, premiered, plot, is_aired, original_language, is_dubbed,
+                    content_rating, user_rating, genres_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title.title_id,
@@ -267,6 +299,11 @@ class StreamBridgeStore:
                     title.premiered,
                     title.plot,
                     1 if title.is_aired else 0,
+                    title.original_language or "en",
+                    1 if title.is_dubbed else 0,
+                    title.content_rating,
+                    title.user_rating,
+                    genres_json,
                     title.created_at,
                     now,
                 ),
@@ -520,6 +557,11 @@ class StreamBridgeStore:
 
     @staticmethod
     def _row_to_title(row: sqlite3.Row) -> Title:
+        raw_genres = row["genres_json"] if "genres_json" in row.keys() and row["genres_json"] else "[]"
+        try:
+            genres = tuple(str(g) for g in json.loads(raw_genres))
+        except Exception:
+            genres = ()
         return Title(
             title_id=row["title_id"],
             media_type=MediaType(row["media_type"]),
@@ -535,6 +577,11 @@ class StreamBridgeStore:
             premiered=row["premiered"],
             plot=row["plot"],
             is_aired=bool(row["is_aired"]),
+            original_language=row["original_language"] if "original_language" in row.keys() and row["original_language"] else "en",
+            is_dubbed=bool(row["is_dubbed"]) if "is_dubbed" in row.keys() else False,
+            content_rating=row["content_rating"] if "content_rating" in row.keys() else None,
+            user_rating=float(row["user_rating"]) if "user_rating" in row.keys() and row["user_rating"] is not None else None,
+            genres=genres,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

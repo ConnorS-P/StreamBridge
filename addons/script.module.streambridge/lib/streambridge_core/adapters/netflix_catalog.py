@@ -158,6 +158,9 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 if entry.get("type") in ("movie", "short_film")
                 else MediaType.SHOW
             )
+            orig_lang = str(entry.get("original_language", "en")).lower()
+            is_dubbed = bool(entry.get("is_dubbed", orig_lang != "en" and region.upper() in ("US", "GB", "CA", "AU", "NZ")))
+            raw_genres = entry.get("genre_names") or entry.get("genres") or ()
             title = Title(
                 title_id=generate_title_id(),
                 media_type=media_type,
@@ -165,6 +168,11 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 year=entry.get("year"),
                 tmdb_id=str(entry["tmdb_id"]) if entry.get("tmdb_id") else None,
                 imdb_id=entry.get("imdb_id"),
+                original_language=orig_lang,
+                is_dubbed=is_dubbed,
+                content_rating=entry.get("us_rating") or entry.get("content_rating"),
+                user_rating=float(entry["user_rating"]) if entry.get("user_rating") is not None else None,
+                genres=tuple(str(g) for g in raw_genres),
             )
             offer = Offer(
                 title_id=title.title_id,

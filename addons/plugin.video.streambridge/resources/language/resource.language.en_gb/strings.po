@@ -29,6 +29,10 @@ msgctxt "#30002"
 msgid "Playback & Security"
 msgstr ""
 
+msgctxt "#30003"
+msgid "Library Filters"
+msgstr ""
+
 # Groups (30010 - 30019)
 msgctxt "#30010"
 msgid "Library Projection"
@@ -42,13 +46,25 @@ msgctxt "#30012"
 msgid "Playback Backend & Session Security"
 msgstr ""
 
+msgctxt "#30013"
+msgid "Language & Dubbing Filters"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Content & Maturity Rating Filters"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Genre, Format & Quality Filters"
+msgstr ""
+
 # General & Library Export Settings (30100 - 30119)
 msgctxt "#30100"
 msgid "Streaming Library Export Root"
 msgstr ""
 
 msgctxt "#30101"
-msgid "Directory where StreamBridge generates per-provider Movie and TV .strm and .nfo files for Kodi's library scanner."
+msgid "Directory where StreamBridge generates per-provider Movie and TV .strm files for Kodi's library scanner."
 msgstr ""
 
 msgctxt "#30102"
@@ -56,11 +72,11 @@ msgid "Select Streaming Export Directory"
 msgstr ""
 
 msgctxt "#30103"
-msgid "Generate NFO files with TMDB/IMDb UniqueIDs"
+msgid "Generate companion NFO files (Advanced)"
 msgstr ""
 
 msgctxt "#30104"
-msgid "Write companion .nfo files containing canonical TMDB, IMDb, and Netflix IDs for accurate scraping and Trakt/TMDb Helper integration. User-edited NFOs are never overwritten."
+msgid "Disabled by default so Kodi's configured scraper (e.g. TMDB) fetches full artwork, cast, and ratings directly."
 msgstr ""
 
 msgctxt "#30105"
@@ -104,10 +120,6 @@ msgctxt "#30205"
 msgid "Watchmode API"
 msgstr ""
 
-msgctxt "#30206"
-msgid "TMDB Watch Providers API"
-msgstr ""
-
 msgctxt "#30207"
 msgid "Catalog Region (ISO-3166-1 alpha-2)"
 msgstr ""
@@ -122,14 +134,6 @@ msgstr ""
 
 msgctxt "#30210"
 msgid "Optional Watchmode API key for live regional Netflix catalog ingestion."
-msgstr ""
-
-msgctxt "#30211"
-msgid "TMDB API Key"
-msgstr ""
-
-msgctxt "#30212"
-msgid "Optional TMDB v3 API key for TMDB Watch Providers catalog discovery."
 msgstr ""
 
 # Playback & Security Settings (30300 - 30329)
@@ -163,4 +167,137 @@ msgstr ""
 
 msgctxt "#30307"
 msgid "Wipes the isolated DPAPI-encrypted browser profile directory used for streaming logins."
+msgstr ""
+
+# Library Filters Settings (30400 - 30449)
+msgctxt "#30400"
+msgid "Allowed Original Languages (Whitelist)"
+msgstr ""
+
+msgctxt "#30401"
+msgid "Comma-separated ISO-639-1 language codes allowed into your library (e.g. 'en' for native English only, 'en,ja' for English + Japanese, or '*' for all languages)."
+msgstr ""
+
+msgctxt "#30402"
+msgid "Blocked Original Languages (Blacklist)"
+msgstr ""
+
+msgctxt "#30403"
+msgid "Comma-separated ISO-639-1 original language codes to always exclude (e.g. 'hi,tr,ko,es')."
+msgstr ""
+
+msgctxt "#30404"
+msgid "Allow dubbed foreign-language content"
+msgstr ""
+
+msgctxt "#30405"
+msgid "When disabled, foreign-language movies/shows dubbed into your language are filtered out so only native-language productions are exported."
+msgstr ""
+
+msgctxt "#30406"
+msgid "Maximum Maturity / Content Rating"
+msgstr ""
+
+msgctxt "#30407"
+msgid "Exclude titles rated above this maturity threshold."
+msgstr ""
+
+msgctxt "#30408"
+msgid "Any (Unrestricted)"
+msgstr ""
+
+msgctxt "#30409"
+msgid "G / TV-G"
+msgstr ""
+
+msgctxt "#30410"
+msgid "PG / TV-PG"
+msgstr ""
+
+msgctxt "#30411"
+msgid "PG-13 / TV-14"
+msgstr ""
+
+msgctxt "#30412"
+msgid "R / TV-MA"
+msgstr ""
+
+msgctxt "#30413"
+msgid "Exclude Kids & Toddler Content (TV-Y, TV-Y7, G)"
+msgstr ""
+
+msgctxt "#30414"
+msgid "Automatically filter out children's and toddler programming from your library."
+msgstr ""
+
+msgctxt "#30415"
+msgid "Blocked Content Ratings (Blacklist)"
+msgstr ""
+
+msgctxt "#30416"
+msgid "Optional comma-separated content ratings to block (e.g. 'TV-Y,TV-Y7,NC-17')."
+msgstr ""
+
+msgctxt "#30417"
+msgid "Exclude Reality TV, Talk Shows & Game Shows"
+msgstr ""
+
+msgctxt "#30418"
+msgid "Filters out unscripted reality TV, dating/cooking competitions, talk shows, and game shows."
+msgstr ""
+
+msgctxt "#30419"
+msgid "Exclude Stand-Up Comedy Specials"
+msgstr ""
+
+msgctxt "#30420"
+msgid "Prevents stand-up comedy specials from cluttering your Movies library."
+msgstr ""
+
+msgctxt "#30421"
+msgid "Exclude Documentaries & Docuseries"
+msgstr ""
+
+msgctxt "#30422"
+msgid "Filters out documentary films and docuseries."
+msgstr ""
+
+msgctxt "#30423"
+msgid "Blocked Genres (Blacklist)"
+msgstr ""
+
+msgctxt "#30424"
+msgid "Optional comma-separated genre names to exclude (e.g. 'Musical,Soap,Western')."
+msgstr ""
+
+msgctxt "#30425"
+msgid "Minimum IMDb / User Rating (0.0 - 9.0)"
+msgstr ""
+
+msgctxt "#30426"
+msgid "Filter out low-rated filler below this score on a 0-10 scale (0.0 disables score filtering)."
+msgstr ""
+
+msgctxt "#30427"
+msgid "Minimum Release Year"
+msgstr ""
+
+msgctxt "#30428"
+msgid "Exclude titles released before this year (0 allows all years)."
+msgstr ""
+
+msgctxt "#30429"
+msgid "Export Movies"
+msgstr ""
+
+msgctxt "#30430"
+msgid "Include streaming movies in library export."
+msgstr ""
+
+msgctxt "#30431"
+msgid "Export TV Series"
+msgstr ""
+
+msgctxt "#30432"
+msgid "Include streaming TV series and episodes in library export."
 msgstr ""

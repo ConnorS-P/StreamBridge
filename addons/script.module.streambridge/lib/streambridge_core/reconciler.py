@@ -24,6 +24,7 @@ import uuid
 
 from .adapters.base import CatalogBatch, ProviderAdapter
 from .db import StreamBridgeStore
+from .filters import LibraryFilterPolicy, evaluate_title_filter
 from .models import (
     AvailabilityState,
     Snapshot,
@@ -55,6 +56,7 @@ class ReconciliationResult:
     removed_count: int = 0
     stale_count: int = 0
     quarantined_count: int = 0
+    filtered_out_count: int = 0
     requires_kodi_scan: bool = False
     requires_kodi_clean: bool = False
     error_summary: str | None = None
@@ -69,10 +71,12 @@ class ReconciliationEngine:
         store: StreamBridgeStore,
         projection_engine: ProjectionEngine,
         config: ReconciliationConfig | None = None,
+        filter_policy: LibraryFilterPolicy | None = None,
     ) -> None:
         self.store = store
         self.projection = projection_engine
         self.config = config or ReconciliationConfig()
+        self.filter_policy = filter_policy or LibraryFilterPolicy.permissive_default()
 
     def reconcile_provider(
         self,
@@ -80,6 +84,7 @@ class ReconciliationEngine:
         region: str = "US",
         cursor: str | None = None,
         force_authoritative_removal: bool = False,
+        filter_policy: LibraryFilterPolicy | None = None,
     ) -> ReconciliationResult:
         """Execute the 6-step reconciliation transaction for `adapter`."""
         provider = adapter.provider_id
@@ -141,6 +146,9 @@ class ReconciliationEngine:
             seen_title_ids: set[str] = set()
             added_count = 0
             updated_count = 0
+            filtered_out_count = 0
+            removed_by_filter_count = 0
+            active_policy = filter_policy or self.filter_policy
 
             # Step 2: Match canonical titles and offers
             for item in batch.items:
@@ -158,10 +166,22 @@ class ReconciliationEngine:
 
                 if offer.availability == AvailabilityState.AVAILABLE:
                     self.store.upsert_offer(offer, conn=conn)
+                    decision = evaluate_title_filter(stored_title, active_policy)
+                    if not decision.allowed:
+                        filtered_out_count += 1
+                        existing_proj = existing_projections.get(stored_title.title_id)
+                        if existing_proj:
+                            self.projection.remove_projection(existing_proj)
+                            self.store.delete_projection_record(
+                                stored_title.title_id, provider, conn=conn
+                            )
+                            removed_by_filter_count += 1
+                        continue
+
                     proj = self.projection.project_title(stored_title, offer)
                     if proj is not None:
                         self.store.upsert_projection(proj, conn=conn)
-                        if was_present:
+                        if was_present and stored_title.title_id in existing_projections:
                             updated_count += 1
                         else:
                             added_count += 1
@@ -171,7 +191,7 @@ class ReconciliationEngine:
                     self.store.upsert_offer(offer, conn=conn)
 
             # Step 3: Stage removals & check mass-deletion quarantine on COMPLETE snapshots
-            removed_count = 0
+            removed_count = removed_by_filter_count
             stale_count = 0
             quarantined_count = 0
 
@@ -266,6 +286,7 @@ class ReconciliationEngine:
                 removed_count=removed_count,
                 stale_count=stale_count,
                 quarantined_count=quarantined_count,
+                filtered_out_count=filtered_out_count,
                 requires_kodi_scan=(added_count > 0),
                 requires_kodi_clean=(removed_count > 0),
                 error_summary=batch.error_summary,

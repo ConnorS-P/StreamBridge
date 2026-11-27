@@ -160,14 +160,17 @@ class StreamBridgePluginApp:
         return entries
 
     def sync_provider(self, provider_id: str = "netflix", region: str = "US") -> ReconciliationResult:
-        res = self.reconciler.reconcile_provider(self.adapter, region=region)
+        policy = self.kodi.load_filter_policy()
+        res = self.reconciler.reconcile_provider(
+            self.adapter, region=region, filter_policy=policy
+        )
         if res.requires_kodi_scan:
             self.rpc.request_targeted_scan()
         if res.requires_kodi_clean:
             self.rpc.request_targeted_clean()
         self.kodi.notify(
             "StreamBridge Sync Complete",
-            f"Added: {res.added_count}, Updated: {res.updated_count}, Removed: {res.removed_count}",
+            f"Added: {res.added_count}, Filtered: {res.filtered_out_count}, Removed: {res.removed_count}",
         )
         return res
 

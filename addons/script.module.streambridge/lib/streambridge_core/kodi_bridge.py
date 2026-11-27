@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from .filters import LibraryFilterPolicy
 from .models import LaunchDescriptor, MediaType, Offer, PlaybackState, Title
 from .security import redact_secrets
 
@@ -208,3 +209,29 @@ class KodiBridge:
         target = fallback_dir or (Path.home() / ".streambridge")
         target.mkdir(parents=True, exist_ok=True)
         return target
+
+    def load_filter_policy(self) -> LibraryFilterPolicy:
+        """Load the user's configured `LibraryFilterPolicy` from Kodi settings when in Kodi."""
+        if not (IN_KODI and xbmcaddon is not None):
+            return LibraryFilterPolicy.permissive_default()
+        try:
+            addon = xbmcaddon.Addon("plugin.video.streambridge")
+            settings_dict = {
+                "include_movies": addon.getSettingBool("include_movies"),
+                "include_tv_shows": addon.getSettingBool("include_tv_shows"),
+                "allowed_original_languages": addon.getSettingString("allowed_original_languages"),
+                "blocked_original_languages": addon.getSettingString("blocked_original_languages"),
+                "allow_dubbed_content": addon.getSettingBool("allow_dubbed_content"),
+                "max_content_rating": addon.getSettingString("max_content_rating"),
+                "exclude_kids_content": addon.getSettingBool("exclude_kids_content"),
+                "blocked_content_ratings": addon.getSettingString("blocked_content_ratings"),
+                "exclude_reality_and_talk": addon.getSettingBool("exclude_reality_and_talk"),
+                "exclude_standup": addon.getSettingBool("exclude_standup"),
+                "exclude_documentaries": addon.getSettingBool("exclude_documentaries"),
+                "blocked_genres": addon.getSettingString("blocked_genres"),
+                "min_user_rating": addon.getSettingNumber("min_user_rating"),
+                "min_release_year": addon.getSettingInt("min_release_year"),
+            }
+            return LibraryFilterPolicy.from_kodi_settings(settings_dict)
+        except Exception:
+            return LibraryFilterPolicy.permissive_default()

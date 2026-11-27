@@ -30,6 +30,125 @@
                 </setting>
             </group>
         </category>
+        <category id="filters" label="30003" help="">
+            <group id="language_filters" label="30013">
+                <setting id="allowed_original_languages" type="string" label="30400" help="30401">
+                    <level>0</level>
+                    <default>en</default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30400</heading>
+                    </control>
+                </setting>
+                <setting id="blocked_original_languages" type="string" label="30402" help="30403">
+                    <level>0</level>
+                    <default/>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30402</heading>
+                    </control>
+                </setting>
+                <setting id="allow_dubbed_content" type="boolean" label="30404" help="30405">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+            <group id="rating_filters" label="30014">
+                <setting id="max_content_rating" type="string" label="30406" help="30407">
+                    <level>0</level>
+                    <default>any</default>
+                    <constraints>
+                        <options>
+                            <option label="30408">any</option>
+                            <option label="30409">G</option>
+                            <option label="30410">PG</option>
+                            <option label="30411">PG-13</option>
+                            <option label="30412">R</option>
+                        </options>
+                    </constraints>
+                    <control type="spinner" format="string"/>
+                </setting>
+                <setting id="exclude_kids_content" type="boolean" label="30413" help="30414">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="blocked_content_ratings" type="string" label="30415" help="30416">
+                    <level>1</level>
+                    <default/>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30415</heading>
+                    </control>
+                </setting>
+            </group>
+            <group id="genre_quality_filters" label="30015">
+                <setting id="exclude_reality_and_talk" type="boolean" label="30417" help="30418">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="exclude_standup" type="boolean" label="30419" help="30420">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="exclude_documentaries" type="boolean" label="30421" help="30422">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="blocked_genres" type="string" label="30423" help="30424">
+                    <level>0</level>
+                    <default/>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30423</heading>
+                    </control>
+                </setting>
+                <setting id="min_user_rating" type="number" label="30425" help="30426">
+                    <level>0</level>
+                    <default>0.0</default>
+                    <constraints>
+                        <minimum>0.0</minimum>
+                        <step>0.5</step>
+                        <maximum>9.0</maximum>
+                    </constraints>
+                    <control type="slider" format="number"/>
+                </setting>
+                <setting id="min_release_year" type="integer" label="30427" help="30428">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                        <step>1</step>
+                        <maximum>2030</maximum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30427</heading>
+                    </control>
+                </setting>
+                <setting id="include_movies" type="boolean" label="30429" help="30430">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="include_tv_shows" type="boolean" label="30431" help="30432">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
         <category id="providers" label="30001" help="">
             <group id="netflix_config" label="30011">
                 <setting id="netflix_enabled" type="boolean" label="30200" help="30201">

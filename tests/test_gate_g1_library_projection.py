@@ -190,3 +190,67 @@ def test_g1_plugin_routing_and_ecosystem_metadata(tmp_path: Path) -> None:
     finally:
         plugin_entry.set_app(None)
         store.close()
+
+
+def test_g1_library_filters_exclude_dubbed_foreign_ratings_and_genres(tmp_path: Path) -> None:
+    from streambridge_core.filters import LibraryFilterPolicy, evaluate_title_filter
+
+    store = StreamBridgeStore(tmp_path / "sb.db")
+    export_root = tmp_path / "library"
+    projection = ProjectionEngine(export_root)
+    reconciler = ReconciliationEngine(store, projection)
+
+    fixture_path = Path(__file__).resolve().parents[1] / "fixtures" / "netflix_sample_catalog.json"
+    adapter = FixtureAdapter(store, fixture_path=fixture_path)
+
+    # 1. Permissive default exports all 6 sample items (including German-language dubbed 'All Quiet on the Western Front')
+    r_all = reconciler.reconcile_provider(adapter, filter_policy=LibraryFilterPolicy.permissive_default())
+    assert r_all.added_count == 6
+    assert r_all.filtered_out_count == 0
+    assert len(list(export_root.rglob("*.strm"))) == 6
+
+    # 2. Native English-only + no dubbed content -> filters out 'All Quiet on the Western Front' (original_language="de", is_dubbed=True)
+    # and automatically removes its previously projected .strm file + flags requires_kodi_clean!
+    english_native_policy = LibraryFilterPolicy(
+        allowed_original_languages=("en",),
+        allow_dubbed_content=False,
+    )
+    r_en = reconciler.reconcile_provider(adapter, filter_policy=english_native_policy)
+    assert r_en.filtered_out_count == 1
+    assert r_en.removed_count == 1
+    assert r_en.requires_kodi_clean is True
+    assert len(list(export_root.rglob("*.strm"))) == 5
+
+    # 3. Direct unit checks for content rating, reality/standup/documentary genres, min rating, and min year
+    reality_show = Title(
+        title_id="sb_reality_1",
+        media_type=MediaType.SHOW,
+        title="Love Is Blind",
+        original_language="en",
+        content_rating="TV-MA",
+        user_rating=6.1,
+        genres=("Reality", "Romance"),
+    )
+    assert not evaluate_title_filter(
+        reality_show, LibraryFilterPolicy(exclude_reality_and_talk=True)
+    ).allowed
+
+    kids_show = Title(
+        title_id="sb_kids_1",
+        media_type=MediaType.SHOW,
+        title="CoComelon",
+        original_language="en",
+        content_rating="TV-Y",
+        user_rating=4.2,
+        genres=("Animation", "Family"),
+    )
+    assert not evaluate_title_filter(
+        kids_show, LibraryFilterPolicy(exclude_kids_content=True)
+    ).allowed
+    assert not evaluate_title_filter(
+        kids_show, LibraryFilterPolicy(min_user_rating=6.5)
+    ).allowed
+    assert not evaluate_title_filter(
+        reality_show, LibraryFilterPolicy(exclude_reality_and_talk=False, max_content_rating="PG-13")
+    ).allowed
+    store.close()

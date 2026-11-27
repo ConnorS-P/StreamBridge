@@ -63,6 +63,11 @@ class Title:
     premiered: Optional[str] = None
     plot: Optional[str] = None
     is_aired: bool = True
+    original_language: str = "en"
+    is_dubbed: bool = False
+    content_rating: Optional[str] = None
+    user_rating: Optional[float] = None
+    genres: tuple[str, ...] = ()
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 

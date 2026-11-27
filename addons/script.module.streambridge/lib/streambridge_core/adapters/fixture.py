@@ -101,6 +101,7 @@ class FixtureAdapter(ProviderAdapter):
                 allowed_hosts=self.descriptor.allowed_hosts,
             )
 
+            raw_genres = raw.get("genres") or ()
             title = Title(
                 title_id=raw.get("title_id") or generate_title_id(),
                 media_type=media_type,
@@ -116,6 +117,11 @@ class FixtureAdapter(ProviderAdapter):
                 premiered=raw.get("premiered"),
                 plot=raw.get("plot"),
                 is_aired=bool(raw.get("is_aired", True)),
+                original_language=str(raw.get("original_language", "en")),
+                is_dubbed=bool(raw.get("is_dubbed", False)),
+                content_rating=raw.get("content_rating"),
+                user_rating=float(raw["user_rating"]) if raw.get("user_rating") is not None else None,
+                genres=tuple(str(g) for g in raw_genres),
             )
 
             offer = Offer(
