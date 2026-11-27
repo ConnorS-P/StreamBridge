@@ -142,7 +142,8 @@ class ProjectionEngine:
         uid_sb = ET.SubElement(root, "uniqueid", attrib={"type": "streambridge"})
         uid_sb.text = title.title_id
 
-        ET.indent(root, space="  ")
+        if hasattr(ET, "indent"):
+            ET.indent(root, space="  ")
         xml_body = ET.tostring(root, encoding="unicode")
         return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n{NFO_OWNERSHIP_MARKER}\n{xml_body}\n'
 

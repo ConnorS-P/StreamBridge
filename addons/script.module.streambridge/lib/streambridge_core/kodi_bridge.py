@@ -215,6 +215,22 @@ class KodiBridge:
         target.mkdir(parents=True, exist_ok=True)
         return target
 
+    def get_export_root(self, fallback_dir: Path | None = None) -> Path:
+        """Resolve and pre-create the configured `export_root` directory so Kodi's file browser never hangs."""
+        if IN_KODI and xbmcvfs is not None and xbmcaddon is not None:
+            try:
+                addon = xbmcaddon.Addon("plugin.video.streambridge")
+                configured = addon.getSettingString("export_root") or "special://profile/addon_data/plugin.video.streambridge/library"
+                translated = xbmcvfs.translatePath(configured)
+                p = Path(translated)
+                p.mkdir(parents=True, exist_ok=True)
+                return p
+            except Exception as exc:
+                self.log(f"Failed to resolve export_root setting: {exc}", level="warning")
+        target = fallback_dir or (self.get_profile_dir() / "library")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
     def load_filter_policy(self) -> LibraryFilterPolicy:
         """Load the user's configured radio-button `LibraryFilterPolicy` from Kodi settings."""
         if not (IN_KODI and xbmcaddon is not None):

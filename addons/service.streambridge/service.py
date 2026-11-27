@@ -46,11 +46,12 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         region: str = "US",
     ) -> None:
         super().__init__()
-        self.kodi = kodi_bridge or KodiBridge("service.streambridge")
+        self.kodi = kodi_bridge or KodiBridge("plugin.video.streambridge")
         self.rpc = kodi_rpc or KodiJsonRpcClient()
         profile_dir = self.kodi.get_profile_dir()
         self.store = store or StreamBridgeStore(profile_dir / "streambridge.db")
-        self.export_root = export_root or (profile_dir / "library")
+        self.export_root = export_root or self.kodi.get_export_root(profile_dir / "library")
+        self.export_root.mkdir(parents=True, exist_ok=True)
         self.projection = ProjectionEngine(self.export_root, write_nfo=False)
         self.reconciler = ReconciliationEngine(self.store, self.projection)
         default_fixture = (

@@ -38,7 +38,8 @@ testpaths = ["tests"]
 addopts = "-v"
 
 [tool.ruff]
-target-version = "py310"
+# Kodi 21 on Windows bundles Python 3.8 (python3.8.dll)
+target-version = "py38"
 line-length = 120
 exclude = [".reference", "dist", "build", "player"]
 
@@ -47,6 +48,7 @@ exclude = [".reference", "dist", "build", "player"]
 select = ["E", "F", "B", "S", "UP"]
 ignore = [
     "E501",  # Line length handled pragmatically
+    "B905",  # zip(strict=...) is Python 3.10+ only; forbidden on Kodi's Python 3.8 runtime
     "S101",  # Asserts used in tests and internal invariants
     "S314",  # ElementTree used on trusted local NFOs and addon.xml files
     "S324",  # MD5 required by Kodi repository specification for addons.xml.md5 alongside SHA-256

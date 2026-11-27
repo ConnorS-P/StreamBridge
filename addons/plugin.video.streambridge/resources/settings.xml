@@ -9,6 +9,7 @@
                     <default>special://profile/addon_data/plugin.video.streambridge/library</default>
                     <constraints>
                         <allowempty>false</allowempty>
+                        <writable>true</writable>
                     </constraints>
                     <control type="button" format="path">
                         <heading>30102</heading>

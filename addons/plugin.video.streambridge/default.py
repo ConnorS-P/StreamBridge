@@ -85,7 +85,7 @@ class _FallbackPluginRouter:
                 continue
             kwargs: dict[str, str] = {}
             matched = True
-            for rp, pp in zip(route_parts, path_parts, strict=False):
+            for rp, pp in zip(route_parts, path_parts):
                 if rp.startswith("<") and rp.endswith(">"):
                     kwargs[rp[1:-1]] = pp
                 elif rp != pp:
@@ -115,7 +115,8 @@ class StreamBridgePluginApp:
         self.rpc = kodi_rpc or KodiJsonRpcClient()
         profile_dir = self.kodi.get_profile_dir()
         self.store = store or StreamBridgeStore(profile_dir / "streambridge.db")
-        self.export_root = export_root or (profile_dir / "library")
+        self.export_root = export_root or self.kodi.get_export_root(profile_dir / "library")
+        self.export_root.mkdir(parents=True, exist_ok=True)
         self.projection = ProjectionEngine(self.export_root, write_nfo=False)
         self.reconciler = ReconciliationEngine(self.store, self.projection)
 
