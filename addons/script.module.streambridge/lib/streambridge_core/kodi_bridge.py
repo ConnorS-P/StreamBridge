@@ -439,20 +439,28 @@ class KodiBridge:
         else:
             return self.ensure_video_source_entry(folder_path, source_name)
 
-        # 4. Click Control 10 (Path input) -> VirtualKeyboard (Window 10103) -> Input.SendText
-        xbmc.executebuiltin("SendClick(10129,10)")
-        for _ in range(25):
+        # 4. Focus Control 10 (Path list) and send Action(Select) (ACTION_SELECT_ITEM = 7)
+        #    so CGUIDialogMediaSource::OnMessage opens the VirtualKeyboard (Window 10103)
+        xbmc.executebuiltin("Control.SetFocus(10)")
+        xbmc.sleep(150)
+        xbmc.executebuiltin("Action(Select)")
+        for _ in range(30):
             xbmc.sleep(80)
             if xbmc.getCondVisibility("Window.IsActive(virtualkeyboard)"):
                 break
         rpc_client.call("Input.SendText", {"text": target_path_str, "done": True})
-        xbmc.sleep(200)
+        xbmc.sleep(250)
 
-        # 5. Click Control 12 (Source Name edit control) -> Input.SendText
-        xbmc.executebuiltin("SendClick(10129,12)")
+        # 5. Focus Control 12 (Source Name edit control) and send Action(Select) -> Input.SendText
+        xbmc.executebuiltin("Control.SetFocus(12)")
         xbmc.sleep(150)
+        xbmc.executebuiltin("Action(Select)")
+        for _ in range(15):
+            xbmc.sleep(80)
+            if xbmc.getCondVisibility("Window.IsActive(virtualkeyboard)"):
+                break
         rpc_client.call("Input.SendText", {"text": source_name, "done": True})
-        xbmc.sleep(200)
+        xbmc.sleep(250)
 
         # 6. Click Control 18 (OK button on DialogMediaSource.xml)
         #    This executes CMediaSourceSettings::AddShare() in C++ memory, saves sources.xml,
