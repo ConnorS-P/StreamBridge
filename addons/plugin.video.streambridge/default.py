@@ -530,15 +530,17 @@ def play_route(title_id: str) -> PlaybackSessionResult:
     if in_kodi_player:
         import xbmcgui  # type: ignore[import-not-found]
         import xbmcplugin  # type: ignore[import-not-found]
-        from streambridge_core.osd_overlay import generate_chroma_key_avi
 
         proxy_path = app.kodi.get_profile_dir() / "osd_proxy_key.avi"
-        if not proxy_path.exists():
-            generate_chroma_key_avi(proxy_path, duration_seconds=7200)
         title_obj = app.store.get_title(title_id)
+        pb_state = app.store.get_playback_state(title_id)
         if title_obj is not None:
             offers = app.store.get_offers_for_title(title_id, provider="netflix")
-            meta = app.kodi.build_listitem_metadata(title_obj, offer=offers[0] if offers else None)
+            meta = app.kodi.build_listitem_metadata(
+                title_obj,
+                offer=offers[0] if offers else None,
+                playback_state=pb_state,
+            )
             li = meta.get("listitem") or xbmcgui.ListItem(path=str(proxy_path))
             li.setPath(str(proxy_path))
         else:

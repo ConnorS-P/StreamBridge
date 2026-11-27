@@ -131,11 +131,9 @@ class PlaybackBroker:
                 import subprocess
 
                 proxy_path = self.kodi.get_profile_dir() / "osd_proxy_key.avi"
-                target_dur = 7200 if not wait_for_exit else 120
-                if not proxy_path.exists() or proxy_path.stat().st_size < (target_dur * 500):
-                    proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=target_dur)
-                else:
-                    proxy_avi = proxy_path
+                content_dur = int(descriptor.duration_seconds) if (descriptor.duration_seconds and descriptor.duration_seconds > 60) else 7200
+                target_dur = (content_dur + 30) if not wait_for_exit else 120
+                proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=target_dur)
                 self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
                 enable_kodi_osd_cutout()
                 no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0

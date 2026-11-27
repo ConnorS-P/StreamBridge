@@ -217,6 +217,20 @@ HWND FindKodiWindowHandle() {
     return hwnd;
 }
 
+void WriteLiveTelemetryJson(const std::string& json_payload) {
+    wchar_t local_app_data[MAX_PATH] = {};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, local_app_data))) {
+        return;
+    }
+    std::wstring dir = std::wstring(local_app_data) + L"\\StreamBridge";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring path = dir + L"\\live_telemetry.json";
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (out.is_open()) {
+        out << json_payload;
+    }
+}
+
 void EnableKodiChromaKeyCutout(HWND kodi_hwnd) {
     if (!kodi_hwnd) return;
     LONG_PTR ex_style = GetWindowLongPtrW(kodi_hwnd, GWL_EXSTYLE);
@@ -340,6 +354,9 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             break;
         case WM_CLOSE:
             KillTimer(hwnd, 1);
+            if (ctx && !ctx->is_login_session) {
+                WriteLiveTelemetryJson("{\"state\":\"stopped\",\"position_seconds\":0.0,\"duration_seconds\":0.0}");
+            }
             if (ctx && ctx->kodi_layered_applied && ctx->kodi_hwnd) {
                 DisableKodiChromaKeyCutout(ctx->kodi_hwnd);
                 ctx->kodi_layered_applied = false;
@@ -630,10 +647,15 @@ bool RunInteractiveWebView2Window(
                                                 std::string st = ExtractJsonString(json, "state");
                                                 double pos = ExtractJsonDouble(json, "position_seconds");
                                                 double dur = ExtractJsonDouble(json, "duration_seconds");
+                                                WriteLiveTelemetryJson(json);
                                                 if (ctx.on_state_change && !st.empty()) {
                                                     ctx.on_state_change(st, pos, dur);
                                                 }
                                                 if (st == "stopped") {
+                                                    if (ctx.kodi_hwnd && IsWindow(ctx.kodi_hwnd)) {
+                                                        PostMessageW(ctx.kodi_hwnd, WM_KEYDOWN, VK_MEDIA_STOP, 0);
+                                                        PostMessageW(ctx.kodi_hwnd, WM_KEYUP, VK_MEDIA_STOP, 0);
+                                                    }
                                                     PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
                                                 }
                                             }

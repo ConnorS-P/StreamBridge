@@ -193,6 +193,14 @@ class KodiBridge:
                 if title.episode is not None:
                     info_tag.setEpisode(int(title.episode))
             info_tag.setUniqueIDs(unique_ids, defaultuniqueid=default_uid)
+            dur_sec = (
+                int(playback_state.duration_seconds)
+                if playback_state and playback_state.duration_seconds > 60
+                else title.runtime_seconds
+            )
+            if dur_sec and dur_sec > 0:
+                info_tag.setDuration(int(dur_sec))
+                meta["duration"] = int(dur_sec)
             if playback_state:
                 info_tag.setPlayCount(int(playback_state.play_count))
                 if playback_state.position_seconds > 0 and not playback_state.completed:

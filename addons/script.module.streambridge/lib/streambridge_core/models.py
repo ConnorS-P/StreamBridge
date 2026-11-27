@@ -69,6 +69,7 @@ class Title:
     user_rating: float | None = None
     genres: tuple[str, ...] = ()
     in_my_list: bool = False
+    runtime_seconds: int | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -160,6 +161,7 @@ class LaunchDescriptor:
     title_display: str
     preferred_backend: str = "auto"
     resume_position_seconds: float = 0.0
+    duration_seconds: int | None = None
     tmdb_id: str | None = None
     imdb_id: str | None = None
     deep_link_url: str | None = None

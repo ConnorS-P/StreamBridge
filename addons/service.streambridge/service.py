@@ -18,7 +18,12 @@ from streambridge_core.adapters.netflix_catalog import NetflixCatalogAdapter
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
-from streambridge_core.osd_overlay import disable_kodi_osd_cutout, send_player_control
+from streambridge_core.models import PlaybackSessionState, PlaybackState
+from streambridge_core.osd_overlay import (
+    disable_kodi_osd_cutout,
+    read_live_telemetry,
+    send_player_control,
+)
 from streambridge_core.projection import ProjectionEngine
 from streambridge_core.reconciler import ReconciliationEngine, ReconciliationResult
 
@@ -226,6 +231,47 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             return
         self.kodi.log("Video library clean finished", level="info")
 
+    def poll_live_telemetry(self) -> None:
+        """Read live HTML5 `<video>` telemetry from `StreamBridge.Player` and persist duration/progress."""
+        telemetry = read_live_telemetry()
+        if not telemetry:
+            return
+        active_title_id = ""
+        if IN_KODI and xbmc is not None:
+            active_title_id = xbmc.getInfoLabel("Window(10000).Property(streambridge.title_id)") or ""
+        else:
+            active_title_id = self.kodi.window_properties.get("streambridge.title_id", "")
+        if not active_title_id:
+            return
+
+        pos = float(telemetry.get("position_seconds") or 0.0)
+        dur = float(telemetry.get("duration_seconds") or 0.0)
+        raw_state = str(telemetry.get("state") or "playing").lower()
+        if dur <= 0:
+            return
+
+        state_enum = (
+            PlaybackSessionState.PAUSED
+            if raw_state == "paused"
+            else PlaybackSessionState.STOPPED
+            if raw_state == "stopped"
+            else PlaybackSessionState.PLAYING
+        )
+        pb = self.store.get_playback_state(active_title_id) or PlaybackState(title_id=active_title_id)
+        pb.position_seconds = pos
+        pb.duration_seconds = dur
+        pb.last_state = state_enum
+        if dur > 60 and (pos / dur) >= 0.90 and not pb.completed:
+            pb.completed = True
+            pb.play_count += 1
+            pb.position_seconds = 0.0
+        self.store.upsert_playback_state(pb)
+
+        title = self.store.get_title(active_title_id)
+        if title and dur > 60 and title.runtime_seconds != int(dur):
+            title.runtime_seconds = int(dur)
+            self.store.upsert_title(title)
+
     def run_forever(self) -> None:
         sched = self.kodi.load_sync_schedule_settings()
         if sched.get("sync_on_startup", True):
@@ -233,9 +279,13 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         else:
             self.last_sync_timestamp = time.time()
         while not self.abortRequested():
-            if self.waitForAbort(10.0):
+            wait_sec = 2.0 if self.kodi.is_playing_video() else 10.0
+            if self.waitForAbort(wait_sec):
                 break
-            self.run_periodic_sync_if_due()
+            if self.kodi.is_playing_video():
+                self.poll_live_telemetry()
+            else:
+                self.run_periodic_sync_if_due()
 
 
 if __name__ == "__main__":

@@ -120,6 +120,7 @@ query GetPopularNetflixMovies($country: Country!, $first: Int!, $after: String) 
         content(country: $country, language: "en") {
           title
           originalReleaseYear
+          runtime
           ageCertification
           shortDescription
           productionCountries
@@ -134,7 +135,7 @@ query GetPopularNetflixMovies($country: Country!, $first: Int!, $after: String) 
             shortName
           }
         }
-        watchNowOffer(country: $country, platform: WEB) {
+        watchNowOffer(country: $country, platform: WEB, filter: {packages: ["nfx"]}) {
           standardWebURL
         }
       }
@@ -157,6 +158,7 @@ query GetPopularNetflixShows($country: Country!, $first: Int!, $after: String) {
         content(country: $country, language: "en") {
           title
           originalReleaseYear
+          runtime
           ageCertification
           shortDescription
           productionCountries
@@ -171,7 +173,7 @@ query GetPopularNetflixShows($country: Country!, $first: Int!, $after: String) {
             shortName
           }
         }
-        watchNowOffer(country: $country, platform: WEB) {
+        watchNowOffer(country: $country, platform: WEB, filter: {packages: ["nfx"]}) {
           standardWebURL
         }
         ... on Show {
@@ -183,8 +185,9 @@ query GetPopularNetflixShows($country: Country!, $first: Int!, $after: String) {
               content(country: $country, language: "en") {
                 title
                 episodeNumber
+                runtime
               }
-              watchNowOffer(country: $country, platform: WEB) {
+              watchNowOffer(country: $country, platform: WEB, filter: {packages: ["nfx"]}) {
                 standardWebURL
               }
             }
@@ -422,6 +425,8 @@ class NetflixCatalogAdapter(ProviderAdapter):
             )
             age_cert = content.get("ageCertification")
             year = content.get("originalReleaseYear")
+            raw_runtime_min = content.get("runtime")
+            runtime_sec = int(raw_runtime_min) * 60 if raw_runtime_min and int(raw_runtime_min) > 0 else None
             plot = content.get("shortDescription")
             prod_countries = content.get("productionCountries") or []
             orig_lang = _infer_language_from_countries(prod_countries)
@@ -452,6 +457,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                     user_rating=imdb_score,
                     genres=genres,
                     in_my_list=in_my_list,
+                    runtime_seconds=runtime_sec,
                 )
                 offer_obj = Offer(
                     title_id=title_obj.title_id,
@@ -475,6 +481,12 @@ class NetflixCatalogAdapter(ProviderAdapter):
                         ep_content = ep_node.get("content") or {}
                         ep_num = int(ep_content.get("episodeNumber") or 1)
                         ep_title = str(ep_content.get("title") or f"Episode {ep_num}")
+                        ep_rt_min = ep_content.get("runtime")
+                        ep_rt_sec = (
+                            int(ep_rt_min) * 60
+                            if ep_rt_min and int(ep_rt_min) > 0
+                            else runtime_sec
+                        )
                         ep_offer_node = ep_node.get("watchNowOffer") or {}
                         ep_raw_url = str(ep_offer_node.get("standardWebURL") or validated_url)
                         ep_nf_id = _extract_netflix_id(ep_raw_url, fallback=nf_content_id)
@@ -505,6 +517,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
                             user_rating=imdb_score,
                             genres=genres,
                             in_my_list=in_my_list,
+                            runtime_seconds=ep_rt_sec,
                         )
                         ep_offer_obj = Offer(
                             title_id=ep_title_obj.title_id,
@@ -782,6 +795,11 @@ class NetflixCatalogAdapter(ProviderAdapter):
             if playback_state and not playback_state.completed
             else 0.0
         )
+        effective_dur = (
+            int(playback_state.duration_seconds)
+            if playback_state and playback_state.duration_seconds > 60
+            else title.runtime_seconds
+        )
         display_name = (
             f"{title.show_title} S{title.season:02d}E{title.episode:02d} - {title.title}"
             if title.media_type == MediaType.EPISODE and title.show_title
@@ -799,6 +817,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
             title_display=display_name,
             preferred_backend=preferred_backend,
             resume_position_seconds=resume_sec,
+            duration_seconds=effective_dur,
             tmdb_id=title.tmdb_id,
             imdb_id=title.imdb_id,
             deep_link_url=offer.deep_link_url,

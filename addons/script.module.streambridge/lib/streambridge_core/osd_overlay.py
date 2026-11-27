@@ -14,9 +14,12 @@ Implements Option B from the StreamBridge In-Kodi Surface Plan:
 from __future__ import annotations
 
 import ctypes
+import json
+import os
 from pathlib import Path
 import struct
 import sys
+from typing import Any
 
 CHROMA_KEY_RGB: tuple[int, int, int] = (1, 2, 1)
 
@@ -25,8 +28,8 @@ def generate_chroma_key_avi(
     output_path: Path,
     duration_seconds: int = 120,
     fps: int = 1,
-    width: int = 16,
-    height: int = 16,
+    width: int = 8,
+    height: int = 8,
     rgb: tuple[int, int, int] = CHROMA_KEY_RGB,
 ) -> Path:
     """Write a minimal, valid uncompressed 24-bit BI_RGB RIFF AVI file with 0 audio tracks."""
@@ -200,3 +203,21 @@ def send_player_control(action: str, value_seconds: int = 0) -> bool:
     if act in ("stop", "ended", "close"):
         return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
     return False
+
+
+def read_live_telemetry() -> dict[str, Any] | None:
+    """Read live `<video>` telemetry (`state`, `position_seconds`, `duration_seconds`) from `StreamBridge.Player`."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    path = Path(local_app_data) / "StreamBridge" / "live_telemetry.json"
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
