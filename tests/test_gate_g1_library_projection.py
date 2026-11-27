@@ -231,6 +231,16 @@ def test_g1_plugin_routing_and_ecosystem_metadata(tmp_path: Path) -> None:
 
         root_menu = plugin_entry.plugin.run(["plugin://plugin.video.streambridge/", "1", ""])
         assert any("Add Netflix (Movies) to Kodi Video Sources & Sync" in cm[0] for cm in root_menu[0]["context_menu"])
+
+        movie_hdr, movie_msg = app.kodi.build_source_setup_instructions("Netflix (Movies)", media_type="movies")
+        assert "Netflix (Movies)" in movie_hdr
+        assert "Movies are in separate folders that match the movie title: ON" in movie_msg
+        assert "The Movie Database Python" in movie_msg
+
+        tv_hdr, tv_msg = app.kodi.build_source_setup_instructions("Netflix (TV Shows)", media_type="tvshows")
+        assert "Netflix (TV Shows)" in tv_hdr
+        assert "Selected folder contains a single TV show: OFF" in tv_msg
+        assert "TMDb TV Shows" in tv_msg
     finally:
         plugin_entry.set_app(None)
         store.close()

@@ -379,11 +379,42 @@ class KodiBridge:
         folder_path.mkdir(parents=True, exist_ok=True)
         return self._upsert_xml_source_idempotent(xml_path, "video", source_name, folder_path)
 
+    def build_source_setup_instructions(
+        self,
+        source_name: str,
+        media_type: str = "movies",
+    ) -> tuple[str, str]:
+        """Build the user-facing step-by-step scraper configuration instructions for a video source."""
+        heading = f"StreamBridge — Setup Guide: {source_name}"
+        if media_type.lower() in ("tvshows", "tv", "show", "episode"):
+            message = (
+                "When you click OK, StreamBridge will automatically fill in the folder path and name "
+                "in Kodi's 'Add video source' dialog and open the 'Set content' window.\n\n"
+                "In 'Set content', configure these settings:\n"
+                "• This directory contains: TV shows\n"
+                "• Information provider: TMDb TV Shows\n"
+                "• Selected folder contains a single TV show: OFF (each show has its own folder)\n"
+                "Then click OK, and select Yes to scan items into your library."
+            )
+        else:
+            message = (
+                "When you click OK, StreamBridge will automatically fill in the folder path and name "
+                "in Kodi's 'Add video source' dialog and open the 'Set content' window.\n\n"
+                "In 'Set content', configure these settings:\n"
+                "• This directory contains: Movies\n"
+                "• Information provider: The Movie Database Python\n"
+                "• Movies are in separate folders that match the movie title: ON\n"
+                "• Scan recursively: ON\n"
+                "Then click OK, and select Yes to scan items into your library."
+            )
+        return heading, message
+
     def add_video_source_via_native_dialog(
         self,
         folder_path: Path,
         source_name: str,
         rpc_client: Any,
+        media_type: str = "movies",
     ) -> bool:
         """Drive Kodi's native `CGUIDialogMediaSource` (`Window 10129`) so `CMediaSourceSettings::AddShare`
         registers the source in C++ memory, saves `sources.xml`, and opens the `Set content` scraper dialog.
@@ -398,7 +429,17 @@ class KodiBridge:
 
         # Idempotency check against Kodi's live in-memory CMediaSourceSettings via Files.GetSources
         if rpc_client is not None and rpc_client.is_video_source_loaded_in_kodi(folder_path):
+            self.show_ok_dialog(
+                f"StreamBridge — {source_name}",
+                f"'{source_name}' is already registered in your Kodi Video Sources.\n\n"
+                f"To review or update its scraper settings, highlight '{source_name}' under "
+                "Videos -> Files, open the Context Menu (C), and select 'Change content'.",
+            )
             return False
+
+        # Show modal instructions explaining what will happen next and how to configure 'Set content'
+        heading, instructions = self.build_source_setup_instructions(source_name, media_type=media_type)
+        self.show_ok_dialog(heading, instructions)
 
         # 1. Navigate to `sources://video/` inside MyVideoNav (Window 10025)
         if xbmcgui.getCurrentWindowId() == 10025:

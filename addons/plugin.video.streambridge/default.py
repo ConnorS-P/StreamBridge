@@ -262,6 +262,7 @@ class StreamBridgePluginApp:
                     base / "Movies",
                     source_name=label,
                     rpc_client=self.rpc,
+                    media_type="movies",
                 )
                 added.append(label)
             elif media_type in ("tvshows", "tv"):
@@ -270,6 +271,7 @@ class StreamBridgePluginApp:
                     base / "TV",
                     source_name=label,
                     rpc_client=self.rpc,
+                    media_type="tvshows",
                 )
                 added.append(label)
             return added
