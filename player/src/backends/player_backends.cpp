@@ -1109,4 +1109,363 @@ bool ExportNetflixMyListToJson(
     return true;
 }
 
+namespace {
+
+std::wstring LocalFilePathToFileUri(const std::string& raw_path) {
+    std::wstring wpath = Utf8ToWide(raw_path);
+    wchar_t full_path[MAX_PATH] = {};
+    if (GetFullPathNameW(wpath.c_str(), MAX_PATH, full_path, nullptr) == 0) {
+        return L"";
+    }
+    std::wstring uri = L"file:///";
+    for (wchar_t ch : std::wstring(full_path)) {
+        if (ch == L'\\') {
+            uri += L'/';
+        } else {
+            uri += ch;
+        }
+    }
+    return uri;
+}
+
+}  // namespace
+
+bool RunCadmiumFixtureTestWindow(
+    const std::string& html_file_path,
+    std::string* out_error) {
+    std::wstring file_uri = LocalFilePathToFileUri(html_file_path);
+    if (file_uri.empty()) {
+        if (out_error) *out_error = "Invalid fixture HTML path";
+        return false;
+    }
+
+    HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit_com = SUCCEEDED(hr_com);
+
+    WebViewHostContext ctx;
+    ctx.initial_url = file_uri;
+    ctx.is_login_session = false;
+
+    HINSTANCE hinst = GetModuleHandleW(nullptr);
+    const wchar_t* kClassName = L"StreamBridgeWebViewHostClass";
+
+    HWND prev_hwnd = FindWindowW(kClassName, L"StreamBridge Surface");
+    if (prev_hwnd && IsWindow(prev_hwnd)) {
+        SendMessageW(prev_hwnd, WM_CLOSE, 0, 0);
+    }
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = HostWndProc;
+    wc.hInstance = hinst;
+    wc.lpszClassName = kClassName;
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_NOACTIVATE,
+        kClassName,
+        L"StreamBridge Surface",
+        WS_POPUP,
+        -32000,
+        -32000,
+        1280,
+        720,
+        nullptr,
+        nullptr,
+        hinst,
+        &ctx);
+
+    if (!hwnd) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to create offscreen fixture test window";
+        return false;
+    }
+    ctx.main_hwnd = hwnd;
+
+    // 25s safety timeout so automated CI never hangs if a test fails to close the window
+    SetTimer(hwnd, 9002, 25000, [](HWND h, UINT, UINT_PTR, DWORD) {
+        PostMessageW(h, WM_CLOSE, 0, 0);
+    });
+
+    std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
+    SetEnvironmentVariableW(
+        L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        L"--autoplay-policy=no-user-gesture-required");
+    auto env_options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    if (env_options) {
+        env_options->put_AdditionalBrowserArguments(L"--autoplay-policy=no-user-gesture-required");
+    }
+
+    HRESULT hr_wv = CreateCoreWebView2EnvironmentWithOptions(
+        nullptr,
+        profile_dir.empty() ? nullptr : profile_dir.c_str(),
+        env_options.Get(),
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [&](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(result) || !env) {
+                    PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                    return result;
+                }
+                return env->CreateCoreWebView2Controller(
+                    ctx.main_hwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [&](HRESULT ctrl_hr, ICoreWebView2Controller* controller) -> HRESULT {
+                            if (FAILED(ctrl_hr) || !controller) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return ctrl_hr;
+                            }
+                            ctx.controller = controller;
+                            controller->get_CoreWebView2(&ctx.webview);
+                            RECT rc = {0, 0, 1280, 720};
+                            controller->put_Bounds(rc);
+                            controller->put_IsVisible(TRUE);
+                            if (!ctx.webview) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return S_OK;
+                            }
+
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixCadmiumControlScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixTelemetryAndOsdHideScript, nullptr);
+
+                            EventRegistrationToken msg_token = {};
+                            ctx.webview->add_WebMessageReceived(
+                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                    [&ctx](
+                                        ICoreWebView2* /*sender*/,
+                                        ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                                        LPWSTR raw_msg = nullptr;
+                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&raw_msg)) &&
+                                            raw_msg) {
+                                            std::string json = WideToUtf8(raw_msg);
+                                            CoTaskMemFree(raw_msg);
+                                            WriteLiveTelemetryJson(json);
+                                        }
+                                        return S_OK;
+                                    })
+                                    .Get(),
+                                &msg_token);
+
+                            ctx.webview->Navigate(ctx.initial_url.c_str());
+                            return S_OK;
+                        })
+                        .Get());
+            })
+            .Get());
+
+    if (FAILED(hr_wv)) {
+        DestroyWindow(hwnd);
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to initialize WebView2 for fixture test";
+        return false;
+    }
+
+    MSG msg = {};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (uninit_com) CoUninitialize();
+    return true;
+}
+
+bool ProbeNetflixCadmiumContractToJson(
+    const std::string& target_url,
+    const std::string& output_json_path,
+    std::string* out_error) {
+    std::wstring nav_uri;
+    if (ValidateHttpsNetflixUrl(target_url)) {
+        nav_uri = Utf8ToWide(target_url);
+    } else {
+        nav_uri = LocalFilePathToFileUri(target_url);
+        if (nav_uri.empty()) {
+            if (out_error) *out_error = "Probe target must be an HTTPS Netflix URL or local fixture HTML path";
+            return false;
+        }
+    }
+
+    HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit_com = SUCCEEDED(hr_com);
+
+    WebViewHostContext ctx;
+    ctx.initial_url = nav_uri;
+
+    HINSTANCE hinst = GetModuleHandleW(nullptr);
+    const wchar_t* kClassName = L"StreamBridgeCadmiumProbeClass";
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = HostWndProc;
+    wc.hInstance = hinst;
+    wc.lpszClassName = kClassName;
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_NOACTIVATE,
+        kClassName,
+        L"StreamBridge Cadmium Probe",
+        WS_POPUP,
+        -32000,
+        -32000,
+        1280,
+        720,
+        nullptr,
+        nullptr,
+        hinst,
+        &ctx);
+
+    if (!hwnd) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to create probe window";
+        return false;
+    }
+    ctx.main_hwnd = hwnd;
+
+    std::string captured_json = "{\"contract_valid\":false,\"error\":\"timeout\"}";
+    std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
+
+    const wchar_t* kProbeContractScript = LR"JS(
+    (function() {
+        setTimeout(() => {
+            const methods = [
+                'play', 'pause', 'seek', 'getCurrentTime', 'getDuration',
+                'getBusy', 'isPaused', 'getTimedTextTrackList', 'getTimedTextTrack',
+                'setTimedTextTrack', 'getAudioTrackList', 'getAudioTrack', 'setAudioTrack'
+            ];
+            const player = window.__getCadmiumPlayer ? window.__getCadmiumPlayer() : null;
+            const supported = [];
+            const missing = [];
+            for (const m of methods) {
+                if (player && typeof player[m] === 'function') supported.push(m);
+                else missing.push(m);
+            }
+            const hasFalcor = Boolean(
+                window.netflix &&
+                window.netflix.reactContext &&
+                window.netflix.reactContext.models &&
+                window.netflix.reactContext.models.falcorCache &&
+                window.netflix.reactContext.models.falcorCache.videos
+            );
+            const subCount = (player && typeof player.getTimedTextTrackList === 'function')
+                ? (player.getTimedTextTrackList() || []).length : 0;
+            const audCount = (player && typeof player.getAudioTrackList === 'function')
+                ? (player.getAudioTrackList() || []).length : 0;
+            const report = {
+                contract_valid: Boolean(player && missing.length === 0),
+                has_netflix_global: Boolean(window.netflix),
+                has_cadmium_video_player_api: Boolean(player),
+                has_falcor_videos_cache: hasFalcor,
+                supported_methods: supported,
+                missing_methods: missing,
+                video_element_count: document.querySelectorAll('video').length,
+                subtitle_track_count: subCount,
+                audio_track_count: audCount,
+                raw_current_time_mutated: Boolean(window.__rawCurrentTimeMutated),
+                watch_credits_clicked: Boolean(window.__watchCreditsClicked)
+            };
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage(JSON.stringify(report));
+            }
+        }, 1200);
+    })();
+    )JS";
+
+    SetTimer(hwnd, 9003, 12000, [](HWND h, UINT, UINT_PTR, DWORD) {
+        PostMessageW(h, WM_CLOSE, 0, 0);
+    });
+
+    HRESULT hr_wv = CreateCoreWebView2EnvironmentWithOptions(
+        nullptr,
+        profile_dir.empty() ? nullptr : profile_dir.c_str(),
+        nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [&](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(result) || !env) {
+                    PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                    return result;
+                }
+                return env->CreateCoreWebView2Controller(
+                    ctx.main_hwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [&](HRESULT ctrl_hr, ICoreWebView2Controller* controller) -> HRESULT {
+                            if (FAILED(ctrl_hr) || !controller) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return ctrl_hr;
+                            }
+                            ctx.controller = controller;
+                            controller->get_CoreWebView2(&ctx.webview);
+                            RECT rc = {0, 0, 1280, 720};
+                            controller->put_Bounds(rc);
+                            if (!ctx.webview) {
+                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                return S_OK;
+                            }
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixCadmiumControlScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixTelemetryAndOsdHideScript, nullptr);
+
+                            EventRegistrationToken msg_tok = {};
+                            ctx.webview->add_WebMessageReceived(
+                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                    [&](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                                        LPWSTR raw = nullptr;
+                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                                            std::string msg = WideToUtf8(raw);
+                                            CoTaskMemFree(raw);
+                                            if (msg.find("\"contract_valid\"") != std::string::npos) {
+                                                captured_json = msg;
+                                                PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
+                                            }
+                                        }
+                                        return S_OK;
+                                    })
+                                    .Get(),
+                                &msg_tok);
+
+                            EventRegistrationToken nav_tok = {};
+                            ctx.webview->add_NavigationCompleted(
+                                Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                    [&](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                        sender->ExecuteScript(kProbeContractScript, nullptr);
+                                        return S_OK;
+                                    })
+                                    .Get(),
+                                &nav_tok);
+
+                            ctx.webview->Navigate(ctx.initial_url.c_str());
+                            return S_OK;
+                        })
+                        .Get());
+            })
+            .Get());
+
+    if (FAILED(hr_wv)) {
+        DestroyWindow(hwnd);
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to initialize WebView2 for Cadmium probe";
+        return false;
+    }
+
+    MSG msg = {};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    std::ofstream ofs(output_json_path, std::ios::binary | std::ios::trunc);
+    if (!ofs) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to write probe JSON file";
+        return false;
+    }
+    ofs << captured_json;
+    ofs.close();
+
+    if (uninit_com) CoUninitialize();
+    return true;
+}
+
 }  // namespace streambridge

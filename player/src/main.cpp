@@ -79,6 +79,9 @@ int main(int argc, char* argv[]) {
     std::string login_url;
     std::string watch_url;
     std::string export_mylist_path;
+    std::string test_fixture_path;
+    std::string probe_cadmium_url;
+    std::string probe_cadmium_out;
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
@@ -102,6 +105,11 @@ int main(int argc, char* argv[]) {
             watch_url = argv[++i];
         } else if (arg == "--export-mylist" && i + 1 < argc) {
             export_mylist_path = argv[++i];
+        } else if (arg == "--test-fixture" && i + 1 < argc) {
+            test_fixture_path = argv[++i];
+        } else if (arg == "--probe-cadmium" && i + 2 < argc) {
+            probe_cadmium_url = argv[++i];
+            probe_cadmium_out = argv[++i];
         }
     }
 
@@ -111,6 +119,27 @@ int main(int argc, char* argv[]) {
 
     if (diagnose_only) {
         PrintDiagnosticsJson();
+        return 0;
+    }
+
+    if (!test_fixture_path.empty()) {
+        FreeConsole();
+        if (start_from_beginning) {
+            SetEnvironmentVariableW(L"STREAMBRIDGE_START_FROM_BEGINNING", L"1");
+        }
+        std::string err;
+        if (!streambridge::RunCadmiumFixtureTestWindow(test_fixture_path, &err)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    if (!probe_cadmium_url.empty() && !probe_cadmium_out.empty()) {
+        FreeConsole();
+        std::string err;
+        if (!streambridge::ProbeNetflixCadmiumContractToJson(probe_cadmium_url, probe_cadmium_out, &err)) {
+            return 1;
+        }
         return 0;
     }
 

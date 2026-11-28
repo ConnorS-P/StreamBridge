@@ -332,3 +332,105 @@ def test_kodi_settings_xml_labels_match_strings_po() -> None:
             val = elem.text.strip()
             assert val.isdigit(), f"<heading>{val}</heading> must be a numeric string ID"
             assert val in defined_ids, f"Heading ID #{val} not found in strings.po"
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not PLAYER_EXE.exists(), reason="Windows StreamBridge.Player.exe required")
+def test_cadmium_webview2_win32_controls_and_postplay_regression(tmp_path: Path) -> None:
+    from streambridge_core.osd_overlay import read_live_telemetry, send_player_control
+
+    root_dir = Path(__file__).resolve().parents[1]
+    fixture_html = root_dir / "fixtures" / "mock_cadmium_player.html"
+    assert fixture_html.exists()
+
+    # 1. Verify --probe-cadmium contract checker against the Mock Cadmium fixture
+    probe_out = tmp_path / "probe_report.json"
+    probe_proc = subprocess.run(
+        [str(PLAYER_EXE), "--probe-cadmium", str(fixture_html), str(probe_out)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=15,
+    )
+    assert probe_proc.returncode == 0
+    report = json.loads(probe_out.read_text(encoding="utf-8"))
+    assert report["contract_valid"] is True
+    assert report["has_netflix_global"] is True
+    assert report["has_cadmium_video_player_api"] is True
+    assert report["has_falcor_videos_cache"] is True
+    assert report["missing_methods"] == []
+    # Secondary promo trailer <video> must have been automatically removed (leaving 1 <video>)
+    assert report["video_element_count"] == 1
+    assert report["watch_credits_clicked"] is True
+    assert report["raw_current_time_mutated"] is False
+    assert report["subtitle_track_count"] == 3
+    assert report["audio_track_count"] == 2
+
+    # 2. Verify live Win32 PostMessageW (WM_APP + 1..7) against --test-fixture
+    player_proc = subprocess.Popen(
+        [str(PLAYER_EXE), "--test-fixture", str(fixture_html)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        # Wait for WebView2 to initialize and auto-play the Mock Cadmium stream
+        tel: dict[str, object] | None = None
+        for _ in range(30):
+            time.sleep(0.25)
+            tel = read_live_telemetry()
+            if tel and tel.get("state") == "playing" and float(tel.get("duration_seconds") or 0) == 6760.0:
+                break
+        assert tel is not None
+        assert tel.get("state") == "playing"
+        assert float(tel.get("duration_seconds") or 0.0) == 6760.0
+
+        # Absolute seek (WM_APP + 3) to 1200s
+        assert send_player_control("seek", 1200) is True
+        for _ in range(15):
+            time.sleep(0.2)
+            tel = read_live_telemetry()
+            if tel and abs(float(tel.get("position_seconds") or 0.0) - 1200.0) < 5.0:
+                break
+        assert tel is not None
+        assert abs(float(tel.get("position_seconds") or 0.0) - 1200.0) < 5.0
+
+        # Negative relative seek_by -10s (WM_APP + 5) — regression guard for 64-bit LPARAM sign extension!
+        assert send_player_control("seek_by", -10) is True
+        for _ in range(15):
+            time.sleep(0.2)
+            tel = read_live_telemetry()
+            if tel and abs(float(tel.get("position_seconds") or 0.0) - 1190.0) < 5.0:
+                break
+        assert tel is not None
+        assert abs(float(tel.get("position_seconds") or 0.0) - 1190.0) < 5.0
+
+        # Switch subtitle track to index 2 ('Spanish') via WM_APP + 6 and audio track to index 1 ('Japanese') via WM_APP + 7
+        assert send_player_control("set_subtitle", 2) is True
+        assert send_player_control("set_audio", 1) is True
+        for _ in range(15):
+            time.sleep(0.2)
+            tel = read_live_telemetry()
+            subs = (tel or {}).get("subtitles")
+            if isinstance(subs, list) and len(subs) == 3 and subs[2].get("active") is True:
+                break
+        assert tel is not None
+        subs_list = tel.get("subtitles")
+        auds_list = tel.get("audio_tracks")
+        assert isinstance(subs_list, list) and subs_list[2]["active"] is True
+        assert isinstance(auds_list, list) and auds_list[1]["active"] is True
+
+        # Pause (WM_APP + 1)
+        assert send_player_control("pause") is True
+        for _ in range(15):
+            time.sleep(0.2)
+            tel = read_live_telemetry()
+            if tel and tel.get("state") == "paused":
+                break
+        assert tel is not None and tel.get("state") == "paused"
+
+        # Stop (WM_CLOSE)
+        assert send_player_control("stop") is True
+        player_proc.wait(timeout=10)
+        assert player_proc.returncode == 0
+    finally:
+        if player_proc.poll() is None:
+            player_proc.kill()

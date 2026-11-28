@@ -21,6 +21,15 @@ bool ExportNetflixMyListToJson(
     const std::string& output_json_path,
     std::string* out_error);
 
+bool RunCadmiumFixtureTestWindow(
+    const std::string& html_file_path,
+    std::string* out_error);
+
+bool ProbeNetflixCadmiumContractToJson(
+    const std::string& target_url,
+    const std::string& output_json_path,
+    std::string* out_error);
+
 bool ExecutePlayerBackendSession(
     const IpcLaunchRequest& req,
     const std::function<void(const std::string&)>& emit_event_line);

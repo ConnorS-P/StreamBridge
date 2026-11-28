@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>StreamBridge Mock Cadmium Player Fixture</title>
+</head>
+<body>
+    <div class="nf-player-container">
+        <video id="primary-video"></video>
+        <video id="promo-trailer"></video>
+        <button data-uia="watch-credits-seamless-button" id="watch-credits-btn">Watch Credits</button>
+    </div>
+    <script>
+        (function() {
+            const v = document.getElementById('primary-video');
+            let internalPosMs = 0;
+            const internalDurMs = 6760000;
+            let internalPaused = true;
+            let internalBusy = null;
+            let allowRawCurrentTimeWrite = false;
+            window.__rawCurrentTimeMutated = false;
+            window.__watchCreditsClicked = false;
+
+            document.getElementById('watch-credits-btn').addEventListener('click', function() {
+                window.__watchCreditsClicked = true;
+            });
+
+            Object.defineProperty(v, 'readyState', {
+                get: function() { return 4; }
+            });
+            Object.defineProperty(v, 'duration', {
+                get: function() { return internalDurMs / 1000.0; }
+            });
+            Object.defineProperty(v, 'paused', {
+                get: function() { return internalPaused; }
+            });
+            Object.defineProperty(v, 'ended', {
+                get: function() { return internalPosMs >= internalDurMs; }
+            });
+            Object.defineProperty(v, 'currentTime', {
+                get: function() { return internalPosMs / 1000.0; },
+                set: function(val) {
+                    if (!allowRawCurrentTimeWrite) {
+                        window.__rawCurrentTimeMutated = true;
+                        throw new Error('Raw <video>.currentTime mutation is forbidden on Cadmium MSE!');
+                    }
+                    internalPosMs = Math.max(0, Math.min(internalDurMs, Math.round(val * 1000)));
+                }
+            });
+            v.play = function() {
+                internalPaused = false;
+                return Promise.resolve();
+            };
+            v.pause = function() {
+                internalPaused = true;
+            };
+
+            const subtitleTracks = [
+                { trackId: 'sub_none', bcp47: 'none', displayName: 'Off', isNoneTrack: true },
+                { trackId: 'sub_en_cc', bcp47: 'en', displayName: 'English [CC]', isNoneTrack: false },
+                { trackId: 'sub_es', bcp47: 'es', displayName: 'Spanish', isNoneTrack: false }
+            ];
+            let activeSubtitleTrack = subtitleTracks[0];
+
+            const audioTracks = [
+                { trackId: 'aud_en_51', bcp47: 'en', displayName: 'English (5.1)' },
+                { trackId: 'aud_ja_orig', bcp47: 'ja', displayName: 'Japanese (Original)' }
+            ];
+            let activeAudioTrack = audioTracks[0];
+
+            const mockCadmiumPlayer = {
+                play: function() {
+                    internalPaused = false;
+                },
+                pause: function() {
+                    internalPaused = true;
+                },
+                seek: function(targetMs) {
+                    allowRawCurrentTimeWrite = true;
+                    internalPosMs = Math.max(0, Math.min(internalDurMs, Math.round(Number(targetMs) || 0)));
+                    allowRawCurrentTimeWrite = false;
+                },
+                getCurrentTime: function() {
+                    return internalPosMs;
+                },
+                getDuration: function() {
+                    return internalDurMs;
+                },
+                getBusy: function() {
+                    return internalBusy;
+                },
+                isPaused: function() {
+                    return internalPaused;
+                },
+                getTimedTextTrackList: function() {
+                    return subtitleTracks;
+                },
+                getTimedTextTrack: function() {
+                    return activeSubtitleTrack;
+                },
+                setTimedTextTrack: function(track) {
+                    if (track && subtitleTracks.includes(track)) {
+                        activeSubtitleTrack = track;
+                    }
+                },
+                getAudioTrackList: function() {
+                    return audioTracks;
+                },
+                getAudioTrack: function() {
+                    return activeAudioTrack;
+                },
+                setAudioTrack: function(track) {
+                    if (track && audioTracks.includes(track)) {
+                        activeAudioTrack = track;
+                    }
+                }
+            };
+
+            window.netflix = {
+                appContext: {
+                    state: {
+                        playerApp: {
+                            getAPI: function() {
+                                return {
+                                    videoPlayer: {
+                                        getAllPlayerSessionIds: function() {
+                                            return ['watch-session-mock-1'];
+                                        },
+                                        getVideoPlayerBySessionId: function(sid) {
+                                            return sid === 'watch-session-mock-1' ? mockCadmiumPlayer : null;
+                                        }
+                                    }
+                                };
+                            }
+                        }
+                    }
+                },
+                reactContext: {
+                    models: {
+                        falcorCache: {
+                            videos: {
+                                '70037598': {
+                                    bookmark: { value: { bookmarkPosition: 993 } },
+                                    runtime: { value: 6760 }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+        })();
+    </script>
+</body>
+</html>
