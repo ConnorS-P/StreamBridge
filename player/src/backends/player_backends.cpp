@@ -467,12 +467,6 @@ void UpdateOsdLayeredWindow(WebViewHostContext* ctx) {
     int kr = static_cast<int>((ref_px >> 16) & 0xFF);
     int kg = static_cast<int>((ref_px >> 8) & 0xFF);
     int kb = static_cast<int>(ref_px & 0xFF);
-    if (kg < 8) {
-        // Fallback if sample point was covered by a full-screen overlay
-        kr = 16;
-        kg = 48;
-        kb = 32;
-    }
     int k_dg_r = std::max(8, kg - kr);
 
     int total = kw * kh;
@@ -481,31 +475,46 @@ void UpdateOsdLayeredWindow(WebViewHostContext* ctx) {
         int b = static_cast<int>(c & 0xFF);
         int g = static_cast<int>((c >> 8) & 0xFF);
         int r = static_cast<int>((c >> 16) & 0xFF);
+        int max_rgb = std::max(r, std::max(g, b));
 
-        // 1. Exact match to empty proxy video background -> 100% transparent (Alpha = 0)
-        if (std::abs(r - kr) <= 6 && std::abs(g - kg) <= 6 && std::abs(b - kb) <= 6) {
+        // 1. Exact match to empty proxy video background OR pure near-black background -> 100% transparent (Alpha = 0)
+        if (max_rgb <= 5 || (std::abs(r - kr) <= 7 && std::abs(g - kg) <= 7 && std::abs(b - kb) <= 7)) {
             px[i] = 0x00000000;
             continue;
         }
 
-        // 2. Semi-transparent black/dark-gray OSD panel or drop shadow blended over (kr, kg, kb)
-        int dg_r = g - r;
-        int dg_b = g - b;
-        int db_r = b - r;
-        if (dg_r > 1 && db_r >= -2 && dg_b >= -2 && std::abs(dg_b - db_r) <= 7 && g <= (kg + 16)) {
-            int bg_frac_256 = std::min(256, std::max(0, (dg_r * 256) / k_dg_r));
-            int alpha = 255 - ((bg_frac_256 * 255) >> 8);
-            if (alpha <= 10) {
-                px[i] = 0x00000000;
-            } else {
-                int r_clean = std::max(0, r - ((kr * bg_frac_256) >> 8));
-                int g_clean = std::max(0, g - ((kg * bg_frac_256) >> 8));
-                int b_clean = std::max(0, b - ((kb * bg_frac_256) >> 8));
-                px[i] = (static_cast<uint32_t>(alpha) << 24) |
-                        (static_cast<uint32_t>(r_clean) << 16) |
-                        (static_cast<uint32_t>(g_clean) << 8) |
-                        static_cast<uint32_t>(b_clean);
+        // 2a. When chroma-key background (kg >= 16) is present: unmix semi-transparent dark OSD panels & shadows
+        if (kg >= 16) {
+            int dg_r = g - r;
+            int dg_b = g - b;
+            int db_r = b - r;
+            if (dg_r > 1 && db_r >= -3 && dg_b >= -3 && std::abs(dg_b - db_r) <= 8 && g <= (kg + 16)) {
+                int bg_frac_256 = std::min(256, std::max(0, (dg_r * 256) / k_dg_r));
+                int alpha = 255 - ((bg_frac_256 * 255) >> 8);
+                if (alpha <= 10) {
+                    px[i] = 0x00000000;
+                } else {
+                    int r_clean = std::min(alpha, std::max(0, r - ((kr * bg_frac_256) >> 8)));
+                    int g_clean = std::min(alpha, std::max(0, g - ((kg * bg_frac_256) >> 8)));
+                    int b_clean = std::min(alpha, std::max(0, b - ((kb * bg_frac_256) >> 8)));
+                    px[i] = (static_cast<uint32_t>(alpha) << 24) |
+                            (static_cast<uint32_t>(r_clean) << 16) |
+                            (static_cast<uint32_t>(g_clean) << 8) |
+                            static_cast<uint32_t>(b_clean);
+                }
+                continue;
             }
+        } else if (max_rgb <= 64) {
+            // 2b. When PrintWindow captured Kodi's GUI layer over a black (0,0,0) clear target:
+            //     give dark gray OSD panel backgrounds smooth translucent premultiplied alpha
+            int alpha = std::min(255, 110 + max_rgb * 2);
+            int r_pre = std::min(alpha, (r * alpha) / 255);
+            int g_pre = std::min(alpha, (g * alpha) / 255);
+            int b_pre = std::min(alpha, (b * alpha) / 255);
+            px[i] = (static_cast<uint32_t>(alpha) << 24) |
+                    (static_cast<uint32_t>(r_pre) << 16) |
+                    (static_cast<uint32_t>(g_pre) << 8) |
+                    static_cast<uint32_t>(b_pre);
             continue;
         }
 
