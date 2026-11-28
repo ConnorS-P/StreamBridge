@@ -46,7 +46,9 @@ target_link_libraries(StreamBridge.Player PRIVATE
     oleaut32
     uuid
     avrt
+    d3d11
     dxgi
+    windowsapp
     mfplat
     mfuuid
     shlwapi

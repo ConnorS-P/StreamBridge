@@ -27,7 +27,7 @@ CHROMA_KEY_RGB: tuple[int, int, int] = (32, 112, 72)
 def generate_chroma_key_avi(
     output_path: Path,
     duration_seconds: int = 120,
-    fps: int = 4,
+    fps: int = 10,
     width: int = 2,
     height: int = 2,
     rgb: tuple[int, int, int] = CHROMA_KEY_RGB,

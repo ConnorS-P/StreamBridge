@@ -55,6 +55,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_seek_seconds: float | None = None
         self.holding_for_buffer: bool = False
         self.last_programmatic_seek_ts: float = 0.0
+        self.last_programmatic_seek_target: float = -100.0
         self.last_user_seek_ts: float = 0.0
         self.last_user_pause_ts: float = 0.0
         self.last_known_netflix_pos: float = 0.0
@@ -74,11 +75,11 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
 
     def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
         now = time.time()
-        if (now - self.last_programmatic_seek_ts) < 1.2:
+        target_sec = float(time_ms) / 1000.0
+        if (now - self.last_programmatic_seek_ts) < 6.0 or abs(target_sec - self.last_programmatic_seek_target) < 8.0:
             return
         self.last_action = "seek"
         self.last_user_seek_ts = now
-        target_sec = float(time_ms) / 1000.0
         self.last_seek_seconds = target_sec
 
         # Intercept chapterless '>>' (SkipNext to end) and '<<' (SkipPrevious to 0:00) on Kodi's M OSD bar
@@ -93,6 +94,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
             if IN_KODI and xbmc is not None:
                 try:
                     self.last_programmatic_seek_ts = time.time()
+                    self.last_programmatic_seek_target = new_pos
                     xbmc.Player().seekTime(new_pos)
                 except Exception as exc:
                     self.kodi.log(f"SkipNext clamp seekTime skipped: {exc}", level="debug")
@@ -105,6 +107,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
             if IN_KODI and xbmc is not None:
                 try:
                     self.last_programmatic_seek_ts = time.time()
+                    self.last_programmatic_seek_target = new_pos
                     xbmc.Player().seekTime(new_pos)
                 except Exception as exc:
                     self.kodi.log(f"SkipPrev clamp seekTime skipped: {exc}", level="debug")
@@ -334,23 +337,16 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         )
         if IN_KODI and xbmc is not None:
             try:
-                kodi_paused = bool(xbmc.getCondVisibility("Player.Paused"))
-                if is_hung_or_buffering and not kodi_paused:
-                    self.player_monitor.holding_for_buffer = True
-                    xbmc.Player().pause()
-                elif raw_state == "playing" and self.player_monitor.holding_for_buffer:
-                    self.player_monitor.holding_for_buffer = False
-                    if kodi_paused:
-                        xbmc.Player().pause()
-
                 if (
                     raw_state == "playing"
-                    and pos > 0.5
-                    and (now - self.player_monitor.last_user_seek_ts) > 2.0
+                    and pos > 1.0
+                    and (now - self.player_monitor.last_user_seek_ts) > 10.0
+                    and (now - self.player_monitor.last_programmatic_seek_ts) > 10.0
                 ):
                     kodi_pos = float(xbmc.Player().getTime())
-                    if abs(kodi_pos - pos) > 2.5:
+                    if abs(kodi_pos - pos) > 5.0:
                         self.player_monitor.last_programmatic_seek_ts = now
+                        self.player_monitor.last_programmatic_seek_target = pos
                         xbmc.Player().seekTime(pos)
             except Exception as exc:
                 self.kodi.log(f"Player parity sync skipped: {exc}", level="debug")
@@ -382,7 +378,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             if dur > 60 and title.runtime_seconds != int(dur):
                 title.runtime_seconds = int(dur)
                 self.store.upsert_title(title)
-            if (now - self._last_bookmark_sync_ts) >= 15.0 or state_enum != PlaybackSessionState.PLAYING:
+            if (now - self._last_bookmark_sync_ts) >= 15.0 or state_enum == PlaybackSessionState.STOPPED:
                 self._last_bookmark_sync_ts = now
                 self._sync_title_bookmark_to_kodi(title, pb)
 
