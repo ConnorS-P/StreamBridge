@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-kodi-repo
+  cancel-in-progress: false
+
 jobs:
   publish-kodi-repo:
     name: Build & Publish StreamBridge Kodi Repository
