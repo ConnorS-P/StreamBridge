@@ -7,6 +7,8 @@
 #include <WebView2.h>
 #include <WebView2EnvironmentOptions.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -296,6 +298,14 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
 struct WebViewHostContext {
     HWND main_hwnd = nullptr;
     HWND kodi_hwnd = nullptr;
+    HWND osd_hwnd = nullptr;
+    HDC osd_mem_dc = nullptr;
+    HBITMAP osd_dib = nullptr;
+    HGDIOBJ osd_old_bmp = nullptr;
+    uint32_t* osd_pixels = nullptr;
+    int osd_width = 0;
+    int osd_height = 0;
+    int osd_mode = 0;
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
     std::wstring initial_url;
@@ -382,6 +392,150 @@ void DisableKodiChromaKeyCutout(HWND kodi_hwnd) {
     }
 }
 
+void CleanupOsdOverlayResources(WebViewHostContext* ctx) {
+    if (!ctx) return;
+    if (ctx->osd_hwnd && IsWindow(ctx->osd_hwnd)) {
+        DestroyWindow(ctx->osd_hwnd);
+    }
+    ctx->osd_hwnd = nullptr;
+    if (ctx->osd_mem_dc) {
+        if (ctx->osd_old_bmp) {
+            SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
+            ctx->osd_old_bmp = nullptr;
+        }
+        DeleteDC(ctx->osd_mem_dc);
+        ctx->osd_mem_dc = nullptr;
+    }
+    if (ctx->osd_dib) {
+        DeleteObject(ctx->osd_dib);
+        ctx->osd_dib = nullptr;
+    }
+    ctx->osd_pixels = nullptr;
+    ctx->osd_width = 0;
+    ctx->osd_height = 0;
+}
+
+void UpdateOsdLayeredWindow(WebViewHostContext* ctx) {
+    if (!ctx || !ctx->osd_hwnd || !ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) return;
+
+    RECT kodi_rect = {};
+    if (!GetWindowRect(ctx->kodi_hwnd, &kodi_rect)) return;
+    int kw = kodi_rect.right - kodi_rect.left;
+    int kh = kodi_rect.bottom - kodi_rect.top;
+    if (kw <= 0 || kh <= 0) return;
+
+    if (!ctx->osd_dib || ctx->osd_width != kw || ctx->osd_height != kh) {
+        if (ctx->osd_mem_dc) {
+            if (ctx->osd_old_bmp) SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
+            DeleteDC(ctx->osd_mem_dc);
+            ctx->osd_mem_dc = nullptr;
+        }
+        if (ctx->osd_dib) {
+            DeleteObject(ctx->osd_dib);
+            ctx->osd_dib = nullptr;
+        }
+        HDC screen_dc = GetDC(nullptr);
+        ctx->osd_mem_dc = CreateCompatibleDC(screen_dc);
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = kw;
+        bmi.bmiHeader.biHeight = -kh;  // top-down DIB
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        ctx->osd_dib = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        ReleaseDC(nullptr, screen_dc);
+        if (!ctx->osd_dib || !bits) return;
+        ctx->osd_old_bmp = SelectObject(ctx->osd_mem_dc, ctx->osd_dib);
+        ctx->osd_pixels = static_cast<uint32_t*>(bits);
+        ctx->osd_width = kw;
+        ctx->osd_height = kh;
+    }
+
+    // Capture Kodi's D3D11 UI surface (including any skin OSD) without touching StreamBridge.Player
+    if (!PrintWindow(ctx->kodi_hwnd, ctx->osd_mem_dc, 0x00000002 /* PW_RENDERFULLCONTENT */)) {
+        return;
+    }
+
+    // Sample reference background key color from upper-left/right video canvas (away from OSD bars & center popups)
+    uint32_t* px = ctx->osd_pixels;
+    int sample_y = kh / 5;
+    uint32_t p1 = px[sample_y * kw + (kw / 8)];
+    uint32_t p2 = px[sample_y * kw + (kw - kw / 8)];
+    uint32_t ref_px = ((p1 >> 8) & 0xFF) >= ((p2 >> 8) & 0xFF) ? p1 : p2;
+    int kr = static_cast<int>((ref_px >> 16) & 0xFF);
+    int kg = static_cast<int>((ref_px >> 8) & 0xFF);
+    int kb = static_cast<int>(ref_px & 0xFF);
+    if (kg < 8) {
+        // Fallback if sample point was covered by a full-screen overlay
+        kr = 16;
+        kg = 48;
+        kb = 32;
+    }
+    int k_dg_r = std::max(8, kg - kr);
+
+    int total = kw * kh;
+    for (int i = 0; i < total; ++i) {
+        uint32_t c = px[i];
+        int b = static_cast<int>(c & 0xFF);
+        int g = static_cast<int>((c >> 8) & 0xFF);
+        int r = static_cast<int>((c >> 16) & 0xFF);
+
+        // 1. Exact match to empty proxy video background -> 100% transparent (Alpha = 0)
+        if (std::abs(r - kr) <= 6 && std::abs(g - kg) <= 6 && std::abs(b - kb) <= 6) {
+            px[i] = 0x00000000;
+            continue;
+        }
+
+        // 2. Semi-transparent black/dark-gray OSD panel or drop shadow blended over (kr, kg, kb)
+        int dg_r = g - r;
+        int dg_b = g - b;
+        int db_r = b - r;
+        if (dg_r > 1 && db_r >= -2 && dg_b >= -2 && std::abs(dg_b - db_r) <= 7 && g <= (kg + 16)) {
+            int bg_frac_256 = std::min(256, std::max(0, (dg_r * 256) / k_dg_r));
+            int alpha = 255 - ((bg_frac_256 * 255) >> 8);
+            if (alpha <= 10) {
+                px[i] = 0x00000000;
+            } else {
+                int r_clean = std::max(0, r - ((kr * bg_frac_256) >> 8));
+                int g_clean = std::max(0, g - ((kg * bg_frac_256) >> 8));
+                int b_clean = std::max(0, b - ((kb * bg_frac_256) >> 8));
+                px[i] = (static_cast<uint32_t>(alpha) << 24) |
+                        (static_cast<uint32_t>(r_clean) << 16) |
+                        (static_cast<uint32_t>(g_clean) << 8) |
+                        static_cast<uint32_t>(b_clean);
+            }
+            continue;
+        }
+
+        // 3. Opaque skin OSD text, icons, progress bar, or artwork -> 100% opaque (Alpha = 255)
+        px[i] = 0xFF000000 | (c & 0x00FFFFFF);
+    }
+
+    POINT pt_dst = {kodi_rect.left, kodi_rect.top};
+    SIZE sz_win = {kw, kh};
+    POINT pt_src = {0, 0};
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.BlendFlags = 0;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    HDC screen_dc = GetDC(nullptr);
+    UpdateLayeredWindow(
+        ctx->osd_hwnd,
+        screen_dc,
+        &pt_dst,
+        &sz_win,
+        ctx->osd_mem_dc,
+        &pt_src,
+        0,
+        &blend,
+        ULW_ALPHA);
+    ReleaseDC(nullptr, screen_dc);
+}
+
 bool IsPostLoginUrl(const std::wstring& uri) {
     if (uri.find(L"netflix.com/browse") != std::wstring::npos ||
         uri.find(L"netflix.com/SwitchProfile") != std::wstring::npos ||
@@ -448,6 +602,10 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                 if (GetForegroundWindow() == hwnd) {
                     SetForegroundWindow(ctx->kodi_hwnd);
                 }
+            } else if (wparam == 2 && ctx && !ctx->is_login_session) {
+                if (ctx->osd_mode > 0) {
+                    UpdateOsdLayeredWindow(ctx);
+                }
             }
             return 0;
         case WM_APP + 1:
@@ -474,33 +632,25 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             return 0;
         case WM_APP + 4:
             if (ctx && !ctx->is_login_session) {
-                RECT rc = {};
-                GetClientRect(hwnd, &rc);
-                int kw = rc.right - rc.left;
-                int kh = rc.bottom - rc.top;
-                if (wparam == 2 && kw > 0 && kh > 0) {
-                    // Punch out only the centered dialog box + bottom OSD bar so live video stays visible around the menu
-                    HRGN full_rgn = CreateRectRgn(0, static_cast<int>(kh * 0.12), kw, static_cast<int>(kh * 0.76));
-                    HRGN dlg_hole = CreateRectRgn(
-                        static_cast<int>(kw * 0.22),
-                        static_cast<int>(kh * 0.16),
-                        static_cast<int>(kw * 0.78),
-                        static_cast<int>(kh * 0.84));
-                    CombineRgn(full_rgn, full_rgn, dlg_hole, RGN_DIFF);
-                    DeleteObject(dlg_hole);
-                    SetWindowRgn(hwnd, full_rgn, TRUE);
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                } else if (wparam == 1 && kw > 0 && kh > 0) {
-                    HRGN rgn = CreateRectRgn(
+                SetWindowRgn(hwnd, nullptr, TRUE);
+                ctx->osd_mode = static_cast<int>(wparam);
+                if (ctx->osd_mode > 0 && ctx->osd_hwnd) {
+                    UpdateOsdLayeredWindow(ctx);
+                    ShowWindow(ctx->osd_hwnd, SW_SHOWNOACTIVATE);
+                    SetWindowPos(
+                        ctx->osd_hwnd,
+                        HWND_TOP,
                         0,
-                        static_cast<int>(kh * 0.12),
-                        kw,
-                        static_cast<int>(kh * 0.76));
-                    SetWindowRgn(hwnd, rgn, TRUE);
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                    SetTimer(hwnd, 2, 33, nullptr);
                 } else {
-                    SetWindowRgn(hwnd, nullptr, TRUE);
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    KillTimer(hwnd, 2);
+                    if (ctx->osd_hwnd) {
+                        ShowWindow(ctx->osd_hwnd, SW_HIDE);
+                    }
                 }
             }
             return 0;
@@ -536,6 +686,8 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             break;
         case WM_CLOSE:
             KillTimer(hwnd, 1);
+            KillTimer(hwnd, 2);
+            CleanupOsdOverlayResources(ctx);
             if (ctx && !ctx->is_login_session) {
                 WriteLiveTelemetryJson("{\"state\":\"stopped\",\"position_seconds\":0.0,\"duration_seconds\":0.0}");
             }
@@ -691,6 +843,29 @@ bool RunInteractiveWebView2Window(
 
     if (!is_login_session && ctx.kodi_hwnd) {
         SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+        // Create companion per-pixel alpha OSD overlay window owned by hwnd
+        const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayClass";
+        WNDCLASSEXW osd_wc = {};
+        osd_wc.cbSize = sizeof(WNDCLASSEXW);
+        osd_wc.lpfnWndProc = DefWindowProcW;
+        osd_wc.hInstance = hinst;
+        osd_wc.lpszClassName = kOsdClassName;
+        RegisterClassExW(&osd_wc);
+
+        ctx.osd_hwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            kOsdClassName,
+            L"StreamBridge OSD Overlay",
+            WS_POPUP,
+            pos_x,
+            pos_y,
+            win_w,
+            win_h,
+            hwnd,
+            nullptr,
+            hinst,
+            nullptr);
+
         // Keep owned popup in front of kodi_hwnd without stealing keyboard or mouse focus from Kodi
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);

@@ -21,7 +21,7 @@ import struct
 import sys
 from typing import Any
 
-CHROMA_KEY_RGB: tuple[int, int, int] = (1, 2, 1)
+CHROMA_KEY_RGB: tuple[int, int, int] = (16, 48, 32)
 
 
 def generate_chroma_key_avi(
