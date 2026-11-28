@@ -438,3 +438,22 @@ def test_cadmium_webview2_win32_controls_and_postplay_regression(tmp_path: Path)
     finally:
         if player_proc.poll() is None:
             player_proc.kill()
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not PLAYER_EXE.exists(), reason="Windows StreamBridge.Player.exe required")
+def test_d3d11_flip_swapchain_osd_capture_self_test(tmp_path: Path) -> None:
+    out_json = tmp_path / "wgc_report.json"
+    proc = subprocess.run(
+        [str(PLAYER_EXE), "--test-wgc", str(out_json)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=15,
+    )
+    assert proc.returncode == 0
+    report = json.loads(out_json.read_text(encoding="utf-8"))
+    assert report["pass"] is True
+    assert report["bg_alpha"] == 0
+    assert 90 <= int(report["panel_alpha"]) <= 170
+    assert report["text_alpha"] == 255
+
