@@ -124,6 +124,7 @@ const wchar_t* kNetflixCadmiumControlScript = LR"JS(
             position: fixed !important;
             z-index: 9999 !important;
         }
+        video, .watch-video, .nf-player-container { pointer-events: none !important; }
         body { cursor: none !important; overflow: hidden !important; background-color: #000 !important; }
     `;
     if (document.head) {
@@ -465,52 +466,65 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             return 0;
         case WM_APP + 3:
             if (ctx && ctx->webview) {
+                int target_sec = static_cast<int>(wparam);
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek', " +
-                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
+                                  std::to_wstring(target_sec) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
         case WM_APP + 4:
             if (ctx && !ctx->is_login_session) {
-                SetWindowRgn(hwnd, nullptr, TRUE);
-                LONG_PTR ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-                if (wparam == 2) {
-                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED);
-                    SetLayeredWindowAttributes(hwnd, 0, 95, LWA_ALPHA);
+                RECT rc = {};
+                GetClientRect(hwnd, &rc);
+                int kw = rc.right - rc.left;
+                int kh = rc.bottom - rc.top;
+                if (wparam == 2 && kw > 0 && kh > 0) {
+                    // Punch out only the centered dialog box + bottom OSD bar so live video stays visible around the menu
+                    HRGN full_rgn = CreateRectRgn(0, static_cast<int>(kh * 0.12), kw, static_cast<int>(kh * 0.76));
+                    HRGN dlg_hole = CreateRectRgn(
+                        static_cast<int>(kw * 0.22),
+                        static_cast<int>(kh * 0.16),
+                        static_cast<int>(kw * 0.78),
+                        static_cast<int>(kh * 0.84));
+                    CombineRgn(full_rgn, full_rgn, dlg_hole, RGN_DIFF);
+                    DeleteObject(dlg_hole);
+                    SetWindowRgn(hwnd, full_rgn, TRUE);
                     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                } else if (wparam == 1) {
-                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED);
-                    SetLayeredWindowAttributes(hwnd, 0, 140, LWA_ALPHA);
+                } else if (wparam == 1 && kw > 0 && kh > 0) {
+                    HRGN rgn = CreateRectRgn(
+                        0,
+                        static_cast<int>(kh * 0.12),
+                        kw,
+                        static_cast<int>(kh * 0.76));
+                    SetWindowRgn(hwnd, rgn, TRUE);
                     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 } else {
-                    if (ex_style & WS_EX_LAYERED) {
-                        SetWindowLongPtrW(
-                            hwnd,
-                            GWL_EXSTYLE,
-                            ex_style & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
-                    }
+                    SetWindowRgn(hwnd, nullptr, TRUE);
                     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 }
             }
             return 0;
         case WM_APP + 5:
             if (ctx && ctx->webview) {
+                int offset_sec = static_cast<int>(lparam);
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek_by', " +
-                                  std::to_wstring(static_cast<long long>(lparam)) + L");";
+                                  std::to_wstring(offset_sec) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
         case WM_APP + 6:
             if (ctx && ctx->webview) {
+                int sub_idx = static_cast<int>(wparam);
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('set_subtitle', " +
-                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
+                                  std::to_wstring(sub_idx) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
         case WM_APP + 7:
             if (ctx && ctx->webview) {
+                int aud_idx = static_cast<int>(wparam);
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('set_audio', " +
-                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
+                                  std::to_wstring(aud_idx) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
@@ -640,9 +654,8 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd (so DWM renders it in front
-            // of Kodi's D3D11 swapchain) with WS_EX_NOACTIVATE so Kodi keeps keyboard focus ('M' OSD),
-            // and dynamically apply SetWindowRgn cutouts when Kodi's OSD is visible!
+            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd with WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED
+            // so mouse clicks pass 100% through to Kodi and Kodi keeps keyboard focus ('M' OSD).
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -650,7 +663,7 @@ bool RunInteractiveWebView2Window(
             win_w = kodi_screen.right - kodi_screen.left;
             win_h = kodi_screen.bottom - kodi_screen.top;
             win_style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN;
-            ex_style = WS_EX_NOACTIVATE;
+            ex_style = WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT;
             parent_hwnd = ctx.kodi_hwnd;
         }
     }
@@ -677,7 +690,8 @@ bool RunInteractiveWebView2Window(
     ctx.main_hwnd = hwnd;
 
     if (!is_login_session && ctx.kodi_hwnd) {
-        // Keep owned popup in front of kodi_hwnd without stealing keyboard focus from Kodi
+        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+        // Keep owned popup in front of kodi_hwnd without stealing keyboard or mouse focus from Kodi
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetForegroundWindow(ctx.kodi_hwnd);
