@@ -30,6 +30,10 @@ bool ProbeNetflixCadmiumContractToJson(
     const std::string& output_json_path,
     std::string* out_error);
 
+bool RunInProcSwapChainHookTest(
+    const std::string& output_json_path,
+    std::string* out_error);
+
 bool ExecutePlayerBackendSession(
     const IpcLaunchRequest& req,
     const std::function<void(const std::string&)>& emit_event_line);
