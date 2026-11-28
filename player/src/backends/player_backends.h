@@ -30,7 +30,7 @@ bool ProbeNetflixCadmiumContractToJson(
     const std::string& output_json_path,
     std::string* out_error);
 
-bool RunWgcFlipSwapChainTest(
+bool RunInProcSwapChainHookTest(
     const std::string& output_json_path,
     std::string* out_error);
 

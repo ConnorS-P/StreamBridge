@@ -27,6 +27,8 @@ add_library(StreamBridge.Overlay SHARED
 )
 
 target_link_libraries(StreamBridge.Overlay PRIVATE
+    d3d11
+    dxgi
     user32
     gdi32
 )

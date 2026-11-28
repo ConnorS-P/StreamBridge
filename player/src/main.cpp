@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
     std::string test_fixture_path;
     std::string probe_cadmium_url;
     std::string probe_cadmium_out;
-    std::string test_wgc_out;
+    std::string test_inproc_out;
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
@@ -111,8 +111,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--probe-cadmium" && i + 2 < argc) {
             probe_cadmium_url = argv[++i];
             probe_cadmium_out = argv[++i];
-        } else if (arg == "--test-wgc" && i + 1 < argc) {
-            test_wgc_out = argv[++i];
+        } else if ((arg == "--test-inproc-hook" || arg == "--test-wgc") && i + 1 < argc) {
+            test_inproc_out = argv[++i];
         }
     }
 
@@ -146,10 +146,10 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (!test_wgc_out.empty()) {
+    if (!test_inproc_out.empty()) {
         std::string err;
-        if (!streambridge::RunWgcFlipSwapChainTest(test_wgc_out, &err)) {
-            std::cerr << "WGC Test FAILED: " << err << "\n";
+        if (!streambridge::RunInProcSwapChainHookTest(test_inproc_out, &err)) {
+            std::cerr << "InProc Hook Test FAILED: " << err << "\n";
             return 1;
         }
         return 0;

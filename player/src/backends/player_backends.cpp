@@ -336,6 +336,9 @@ struct WebViewHostContext {
     bool wgc_initialized = false;
     int wgc_frames_captured = 0;
     bool last_ulw_ok = false;
+    HANDLE shared_mem_handle = nullptr;
+    void* shared_mem_view = nullptr;
+    uint32_t last_shared_seq = 0;
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
     std::wstring initial_url;
@@ -435,6 +438,14 @@ void CleanupOsdOverlayResources(WebViewHostContext* ctx) {
         }
     } catch (...) {}
     ctx->wgc_initialized = false;
+    if (ctx->shared_mem_view) {
+        UnmapViewOfFile(ctx->shared_mem_view);
+        ctx->shared_mem_view = nullptr;
+    }
+    if (ctx->shared_mem_handle) {
+        CloseHandle(ctx->shared_mem_handle);
+        ctx->shared_mem_handle = nullptr;
+    }
     ctx->d3d_last_frame_tex.Reset();
     ctx->d3d_staging_tex.Reset();
     ctx->d3d_context.Reset();
@@ -458,6 +469,98 @@ void CleanupOsdOverlayResources(WebViewHostContext* ctx) {
     ctx->osd_pixels = nullptr;
     ctx->osd_width = 0;
     ctx->osd_height = 0;
+}
+
+struct SharedOsdHeaderClient {
+    uint32_t magic;
+    uint32_t width;
+    uint32_t height;
+    uint32_t frame_seq;
+    uint32_t active;
+    uint32_t reserved[11];
+};
+
+bool TryUpdateOsdFromSharedMemoryHook(WebViewHostContext* ctx) {
+    if (!ctx || !ctx->osd_hwnd) return false;
+    if (!ctx->shared_mem_view) {
+        ctx->shared_mem_handle = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\StreamBridgeOsdSharedFrame");
+        if (!ctx->shared_mem_handle) return false;
+        ctx->shared_mem_view = MapViewOfFile(ctx->shared_mem_handle, FILE_MAP_READ, 0, 0, 0);
+        if (!ctx->shared_mem_view) {
+            CloseHandle(ctx->shared_mem_handle);
+            ctx->shared_mem_handle = nullptr;
+            return false;
+        }
+    }
+
+    auto* hdr = static_cast<const SharedOsdHeaderClient*>(ctx->shared_mem_view);
+    if (hdr->magic != 0x53424F53u || hdr->active == 0 || hdr->frame_seq == 0) {
+        return false;
+    }
+    int kw = static_cast<int>(hdr->width);
+    int kh = static_cast<int>(hdr->height);
+    if (kw <= 0 || kh <= 0 || kw > 3840 || kh > 2160) return false;
+
+    if (!ctx->osd_dib || ctx->osd_width != kw || ctx->osd_height != kh) {
+        if (ctx->osd_mem_dc) {
+            if (ctx->osd_old_bmp) SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
+            DeleteDC(ctx->osd_mem_dc);
+            ctx->osd_mem_dc = nullptr;
+        }
+        if (ctx->osd_dib) {
+            DeleteObject(ctx->osd_dib);
+            ctx->osd_dib = nullptr;
+        }
+        HDC screen_dc = GetDC(nullptr);
+        ctx->osd_mem_dc = CreateCompatibleDC(screen_dc);
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = kw;
+        bmi.bmiHeader.biHeight = -kh;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        ctx->osd_dib = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        ReleaseDC(nullptr, screen_dc);
+        if (!ctx->osd_dib || !bits) return false;
+        ctx->osd_old_bmp = SelectObject(ctx->osd_mem_dc, ctx->osd_dib);
+        ctx->osd_pixels = static_cast<uint32_t*>(bits);
+        ctx->osd_width = kw;
+        ctx->osd_height = kh;
+    }
+
+    const auto* src_pixels = reinterpret_cast<const uint32_t*>(
+        static_cast<const uint8_t*>(ctx->shared_mem_view) + sizeof(SharedOsdHeaderClient));
+    std::memcpy(ctx->osd_pixels, src_pixels, static_cast<size_t>(kw) * static_cast<size_t>(kh) * 4);
+    ctx->last_shared_seq = hdr->frame_seq;
+
+    RECT kodi_rect = {};
+    if (ctx->kodi_hwnd && IsWindow(ctx->kodi_hwnd)) {
+        GetWindowRect(ctx->kodi_hwnd, &kodi_rect);
+    }
+    POINT pt_dst = {kodi_rect.left, kodi_rect.top};
+    SIZE sz_win = {kw, kh};
+    POINT pt_src = {0, 0};
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.BlendFlags = 0;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    HDC screen_dc = GetDC(nullptr);
+    ctx->last_ulw_ok = (UpdateLayeredWindow(
+        ctx->osd_hwnd,
+        screen_dc,
+        &pt_dst,
+        &sz_win,
+        ctx->osd_mem_dc,
+        &pt_src,
+        0,
+        &blend,
+        ULW_ALPHA) != FALSE);
+    ReleaseDC(nullptr, screen_dc);
+    return ctx->last_ulw_ok;
 }
 
 bool EnsureWgcKodiCapture(WebViewHostContext* ctx) {
@@ -552,18 +655,6 @@ bool DrainWgcFramesToLatest(WebViewHostContext* ctx) {
                     copy_desc.CPUAccessFlags = 0;
                     copy_desc.MiscFlags = 0;
                     ctx->d3d_device->CreateTexture2D(&copy_desc, nullptr, &ctx->d3d_last_frame_tex);
-                } else {
-                    D3D11_TEXTURE2D_DESC cur_desc = {};
-                    ctx->d3d_last_frame_tex->GetDesc(&cur_desc);
-                    if (cur_desc.Width != desc.Width || cur_desc.Height != desc.Height) {
-                        ctx->d3d_last_frame_tex.Reset();
-                        D3D11_TEXTURE2D_DESC copy_desc = desc;
-                        copy_desc.Usage = D3D11_USAGE_DEFAULT;
-                        copy_desc.BindFlags = 0;
-                        copy_desc.CPUAccessFlags = 0;
-                        copy_desc.MiscFlags = 0;
-                        ctx->d3d_device->CreateTexture2D(&copy_desc, nullptr, &ctx->d3d_last_frame_tex);
-                    }
                 }
                 if (ctx->d3d_last_frame_tex) {
                     ctx->d3d_context->CopyResource(ctx->d3d_last_frame_tex.Get(), tex.Get());
@@ -578,7 +669,9 @@ bool DrainWgcFramesToLatest(WebViewHostContext* ctx) {
 }
 
 void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
-    if (!ctx || !ctx->osd_hwnd || !ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) return;
+    if (!ctx || !ctx->osd_hwnd) return;
+    if (TryUpdateOsdFromSharedMemoryHook(ctx)) return;
+    if (!ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) return;
     if (!DrainWgcFramesToLatest(ctx) || !ctx->d3d_last_frame_tex) return;
 
     try {
@@ -679,16 +772,6 @@ void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
                         }
                         continue;
                     }
-                } else if (max_rgb <= 64) {
-                    int alpha = std::min(255, 110 + max_rgb * 2);
-                    int r_pre = std::min(alpha, (r * alpha) / 255);
-                    int g_pre = std::min(alpha, (g * alpha) / 255);
-                    int b_pre = std::min(alpha, (b * alpha) / 255);
-                    dst_row[x] = (static_cast<uint32_t>(alpha) << 24) |
-                                 (static_cast<uint32_t>(r_pre) << 16) |
-                                 (static_cast<uint32_t>(g_pre) << 8) |
-                                 static_cast<uint32_t>(b_pre);
-                    continue;
                 }
 
                 dst_row[x] = 0xFF000000 | (c & 0x00FFFFFF);
@@ -785,9 +868,6 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                 if (!ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) {
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     return 0;
-                }
-                if (ctx->osd_mode == 0) {
-                    DrainWgcFramesToLatest(ctx);
                 }
                 if (GetForegroundWindow() == hwnd) {
                     SetForegroundWindow(ctx->kodi_hwnd);
@@ -1037,8 +1117,6 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode: Create chromeless topmost WS_POPUP with WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED
-            // so mouse clicks pass 100% through to Kodi and Kodi keeps keyboard focus ('M' OSD).
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -1871,15 +1949,37 @@ bool ProbeNetflixCadmiumContractToJson(
     return true;
 }
 
-bool RunWgcFlipSwapChainTest(
+bool RunInProcSwapChainHookTest(
     const std::string& output_json_path,
     std::string* out_error) {
     HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool uninit_com = SUCCEEDED(hr_com);
-    RoInitialize(RO_INIT_SINGLETHREADED);
+
+    wchar_t exe_path[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    PathRemoveFileSpecW(exe_path);
+    std::wstring dll_path = std::wstring(exe_path) + L"\\StreamBridge.Overlay.dll";
+
+    HMODULE hdll = LoadLibraryW(dll_path.c_str());
+    if (!hdll) {
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "Failed to load StreamBridge.Overlay.dll";
+        return false;
+    }
+
+    using EnableFn = int (*)(unsigned int, unsigned int, unsigned int);
+    using DisableFn = int (*)();
+    auto enable_fn = reinterpret_cast<EnableFn>(GetProcAddress(hdll, "SB_EnableKodiOverlayCutout"));
+    auto disable_fn = reinterpret_cast<DisableFn>(GetProcAddress(hdll, "SB_DisableKodiOverlayCutout"));
+    if (!enable_fn || !disable_fn || !enable_fn(32, 112, 72)) {
+        FreeLibrary(hdll);
+        if (uninit_com) CoUninitialize();
+        if (out_error) *out_error = "SB_EnableKodiOverlayCutout failed to install D3D11 hook";
+        return false;
+    }
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);
-    const wchar_t* kMockKodiClass = L"StreamBridgeMockKodiD3D11Class";
+    const wchar_t* kMockKodiClass = L"StreamBridgeMockKodiHookClass";
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = DefWindowProcW;
@@ -1890,57 +1990,22 @@ bool RunWgcFlipSwapChainTest(
     const int kW = 640;
     const int kH = 360;
     HWND mock_kodi = CreateWindowExW(
-        0,
-        kMockKodiClass,
-        L"MockKodiFlipSwapChain",
-        WS_POPUP | WS_VISIBLE,
-        80,
-        80,
-        kW,
-        kH,
-        nullptr,
-        nullptr,
-        hinst,
-        nullptr);
-    if (!mock_kodi) {
-        if (uninit_com) CoUninitialize();
-        if (out_error) *out_error = "Failed to create mock Kodi window";
-        return false;
-    }
+        0, kMockKodiClass, L"MockKodiHookSwapChain", WS_POPUP | WS_VISIBLE,
+        80, 80, kW, kH, nullptr, nullptr, hinst, nullptr);
 
     ComPtr<ID3D11Device> dev;
     ComPtr<ID3D11DeviceContext> dctx;
     D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
-    HRESULT hr = D3D11CreateDevice(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        nullptr,
-        0,
-        D3D11_SDK_VERSION,
-        &dev,
-        &fl,
-        &dctx);
-    if (FAILED(hr) || !dev) {
-        DestroyWindow(mock_kodi);
-        if (uninit_com) CoUninitialize();
-        if (out_error) *out_error = "D3D11CreateDevice failed";
-        return false;
-    }
+    D3D11CreateDevice(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        nullptr, 0, D3D11_SDK_VERSION, &dev, &fl, &dctx);
 
     ComPtr<IDXGIDevice> dxgi_dev;
     ComPtr<IDXGIAdapter> adapter;
     ComPtr<IDXGIFactory2> factory;
-    dev.As(&dxgi_dev);
+    if (dev) dev.As(&dxgi_dev);
     if (dxgi_dev) dxgi_dev->GetAdapter(&adapter);
     if (adapter) adapter->GetParent(IID_PPV_ARGS(&factory));
-    if (!factory) {
-        DestroyWindow(mock_kodi);
-        if (uninit_com) CoUninitialize();
-        if (out_error) *out_error = "IDXGIFactory2 query failed";
-        return false;
-    }
 
     DXGI_SWAP_CHAIN_DESC1 sc_desc = {};
     sc_desc.Width = kW;
@@ -1953,18 +2018,10 @@ bool RunWgcFlipSwapChainTest(
     sc_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 
     ComPtr<IDXGISwapChain1> swapchain;
-    hr = factory->CreateSwapChainForHwnd(dev.Get(), mock_kodi, &sc_desc, nullptr, nullptr, &swapchain);
-    if (FAILED(hr) || !swapchain) {
-        DestroyWindow(mock_kodi);
-        if (uninit_com) CoUninitialize();
-        if (out_error) *out_error = "CreateSwapChainForHwnd (FLIP_DISCARD) failed";
-        return false;
+    if (factory) {
+        factory->CreateSwapChainForHwnd(dev.Get(), mock_kodi, &sc_desc, nullptr, nullptr, &swapchain);
     }
 
-    // Build CPU frame buffer matching Kodi's rendered output:
-    // - Background: RGB(32, 112, 72) -> BGRA(72, 112, 32, 255)
-    // - Translucent OSD bar (y = 240..320): 50% black over RGB(32, 112, 72) -> RGB(16, 56, 36)
-    // - Opaque white OSD text/icon (x = 280..360, y = 260..300): RGB(255, 255, 255)
     std::vector<uint32_t> frame_buf(kW * kH, 0xFF207048u);
     for (int y = 240; y < 320; ++y) {
         for (int x = 0; x < kW; ++x) {
@@ -1977,7 +2034,7 @@ bool RunWgcFlipSwapChainTest(
         }
     }
 
-    const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayTestClass";
+    const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayHookTestClass";
     WNDCLASSEXW osd_wc = {};
     osd_wc.cbSize = sizeof(WNDCLASSEXW);
     osd_wc.lpfnWndProc = DefWindowProcW;
@@ -1990,36 +2047,17 @@ bool RunWgcFlipSwapChainTest(
     ctx.osd_mode = 1;
     ctx.osd_hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        kOsdClassName,
-        L"StreamBridge OSD Overlay Test",
-        WS_POPUP | WS_VISIBLE,
-        80,
-        80,
-        kW,
-        kH,
-        nullptr,
-        nullptr,
-        hinst,
-        nullptr);
+        kOsdClassName, L"StreamBridge OSD Overlay Hook Test", WS_POPUP | WS_VISIBLE,
+        80, 80, kW, kH, nullptr, nullptr, hinst, nullptr);
 
-    EnsureWgcKodiCapture(&ctx);
-
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 6; ++i) {
         ComPtr<ID3D11Texture2D> backbuf;
-        if (SUCCEEDED(swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuf))) && backbuf) {
+        if (swapchain && SUCCEEDED(swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuf))) && backbuf) {
             dctx->UpdateSubresource(backbuf.Get(), 0, nullptr, frame_buf.data(), kW * 4, 0);
-            swapchain->Present(1, 0);
+            swapchain->Present(0, 0);
         }
-        MSG msg = {};
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        Sleep(25);
-        UpdateOsdLayeredWindowWgc(&ctx);
-        if (ctx.wgc_frames_captured >= 2 && ctx.last_ulw_ok && ctx.osd_pixels) {
-            break;
-        }
+        TryUpdateOsdFromSharedMemoryHook(&ctx);
+        if (ctx.last_shared_seq > 0 && ctx.last_ulw_ok) break;
     }
 
     int bg_alpha = -1;
@@ -2036,8 +2074,7 @@ bool RunWgcFlipSwapChainTest(
         text_r = static_cast<int>((px_text >> 16) & 0xFF);
     }
 
-    bool pass = (ctx.wgc_initialized &&
-                 ctx.wgc_frames_captured > 0 &&
+    bool pass = (ctx.last_shared_seq > 0 &&
                  ctx.last_ulw_ok &&
                  bg_alpha == 0 &&
                  panel_alpha >= 90 && panel_alpha <= 170 &&
@@ -2046,9 +2083,8 @@ bool RunWgcFlipSwapChainTest(
     std::ofstream ofs(output_json_path, std::ios::binary | std::ios::trunc);
     if (ofs.is_open()) {
         ofs << "{\n"
-            << "  \"branch\": \"osd/path1-wgc-chroma-unmix\",\n"
-            << "  \"wgc_initialized\": " << (ctx.wgc_initialized ? "true" : "false") << ",\n"
-            << "  \"wgc_frames_captured\": " << ctx.wgc_frames_captured << ",\n"
+            << "  \"branch\": \"osd/path2-inproc-d3d11-hook\",\n"
+            << "  \"shared_seq\": " << ctx.last_shared_seq << ",\n"
             << "  \"ulw_ok\": " << (ctx.last_ulw_ok ? "true" : "false") << ",\n"
             << "  \"bg_alpha\": " << bg_alpha << ",\n"
             << "  \"panel_alpha\": " << panel_alpha << ",\n"
@@ -2059,11 +2095,13 @@ bool RunWgcFlipSwapChainTest(
         ofs.close();
     }
 
+    disable_fn();
     CleanupOsdOverlayResources(&ctx);
     DestroyWindow(mock_kodi);
+    FreeLibrary(hdll);
     if (uninit_com) CoUninitialize();
     if (!pass && out_error) {
-        *out_error = "WGC D3D11 Flip-Model capture or alpha unmix check failed";
+        *out_error = "In-process D3D11 SwapChain Present hook or shared-memory OSD test failed";
     }
     return pass;
 }

@@ -441,10 +441,10 @@ def test_cadmium_webview2_win32_controls_and_postplay_regression(tmp_path: Path)
 
 
 @pytest.mark.skipif(sys.platform != "win32" or not PLAYER_EXE.exists(), reason="Windows StreamBridge.Player.exe required")
-def test_d3d11_flip_swapchain_osd_capture_self_test(tmp_path: Path) -> None:
-    out_json = tmp_path / "wgc_report.json"
+def test_inproc_d3d11_swapchain_hook_self_test(tmp_path: Path) -> None:
+    out_json = tmp_path / "inproc_hook_report.json"
     proc = subprocess.run(
-        [str(PLAYER_EXE), "--test-wgc", str(out_json)],
+        [str(PLAYER_EXE), "--test-inproc-hook", str(out_json)],
         capture_output=True,
         text=True,
         check=True,
@@ -453,6 +453,7 @@ def test_d3d11_flip_swapchain_osd_capture_self_test(tmp_path: Path) -> None:
     assert proc.returncode == 0
     report = json.loads(out_json.read_text(encoding="utf-8"))
     assert report["pass"] is True
+    assert report["shared_seq"] >= 1
     assert report["bg_alpha"] == 0
     assert 90 <= int(report["panel_alpha"]) <= 170
     assert report["text_alpha"] == 255
