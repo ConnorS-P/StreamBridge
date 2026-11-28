@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addons>
+    <addon id="plugin.video.streambridge" name="StreamBridge" version="0.1.34" provider-name="ConnorS-P">
+        <requires>
+            <import addon="xbmc.python" version="3.0.1" />
+            <import addon="script.module.streambridge" version="0.1.34" />
+            <import addon="script.module.routing" version="0.2.3" />
+            <import addon="script.module.requests" version="2.31.0" />
+            <import addon="script.module.inputstreamhelper" version="0.6.1" optional="true" />
+        </requires>
+        <extension point="xbmc.python.pluginsource" library="default.py">
+            <provides>video</provides>
+        </extension>
+        <extension point="xbmc.addon.metadata">
+            <summary lang="en_GB">Kodi-native subscription streaming library &amp; source-direct player</summary>
+            <description lang="en_GB">Integrates subscription streaming services (starting with Netflix) into Kodi's native library via stable .strm/.nfo projections and launches authorized playback via StreamBridge.Player or platform-native fallbacks.</description>
+            <platform>all</platform>
+            <license>MIT</license>
+            <source>https://github.com/ConnorS-P/StreamBridge</source>
+        </extension>
+    </addon>
+    <addon id="repository.streambridge" name="StreamBridge Kodi Repository" version="0.1.0" provider-name="ConnorS-P">
+        <extension point="xbmc.addon.repository" name="StreamBridge Kodi Repository">
+            <dir minversion="21.0.0">
+                <info compressed="false">https://raw.githubusercontent.com/ConnorS-P/StreamBridge/repo/repo/addons.xml</info>
+                <checksum>https://raw.githubusercontent.com/ConnorS-P/StreamBridge/repo/repo/addons.xml.md5</checksum>
+                <datadir zip="true">https://raw.githubusercontent.com/ConnorS-P/StreamBridge/repo/repo/</datadir>
+                <hashes>sha256</hashes>
+            </dir>
+        </extension>
+        <extension point="xbmc.addon.metadata">
+            <summary lang="en_GB">Official Kodi Add-on Repository for StreamBridge</summary>
+            <description lang="en_GB">Install and automatically update StreamBridge (plugin.video.streambridge, service.streambridge, and script.module.streambridge) for Kodi 21 (Omega) and newer.</description>
+            <platform>all</platform>
+            <license>MIT</license>
+            <source>https://github.com/ConnorS-P/StreamBridge</source>
+        </extension>
+    </addon>
+    <addon id="script.module.streambridge" name="StreamBridge Core Module" version="0.1.34" provider-name="ConnorS-P">
+        <requires>
+            <import addon="xbmc.python" version="3.0.1" />
+            <import addon="script.module.requests" version="2.31.0" />
+        </requires>
+        <extension point="xbmc.python.module" library="lib" />
+        <extension point="xbmc.addon.metadata">
+            <summary lang="en_GB">Core engine for StreamBridge Kodi streaming integration</summary>
+            <description lang="en_GB">Provides the SQLite reconciliation database, .strm/.nfo physical projection engine, provider catalog adapters, security/redaction filters, and cross-platform playback broker for StreamBridge.</description>
+            <platform>all</platform>
+            <license>MIT</license>
+            <source>https://github.com/ConnorS-P/StreamBridge</source>
+        </extension>
+    </addon>
+    <addon id="service.streambridge" name="StreamBridge Background Service" version="0.1.34" provider-name="ConnorS-P">
+        <requires>
+            <import addon="xbmc.python" version="3.0.1" />
+            <import addon="script.module.streambridge" version="0.1.34" />
+            <import addon="plugin.video.streambridge" version="0.1.34" />
+        </requires>
+        <extension point="xbmc.service" library="service.py" start="login" />
+        <extension point="xbmc.addon.metadata">
+            <summary lang="en_GB">Catalog sync, library scan/clean monitor, and state bridge for StreamBridge</summary>
+            <description lang="en_GB">Monitors Kodi library scan and clean lifecycle events, runs non-blocking provider catalog reconciliation, and synchronizes playback state without refresh loops.</description>
+            <platform>all</platform>
+            <license>MIT</license>
+            <source>https://github.com/ConnorS-P/StreamBridge</source>
+        </extension>
+    </addon>
+</addons>
