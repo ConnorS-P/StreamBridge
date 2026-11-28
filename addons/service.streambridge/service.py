@@ -18,7 +18,7 @@ from streambridge_core.adapters.netflix_catalog import NetflixCatalogAdapter
 from streambridge_core.db import StreamBridgeStore
 from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
-from streambridge_core.models import PlaybackSessionState, PlaybackState
+from streambridge_core.models import PlaybackSessionState, PlaybackState, Title
 from streambridge_core.osd_overlay import (
     disable_kodi_osd_cutout,
     read_live_telemetry,
@@ -53,28 +53,45 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.kodi = kodi_bridge
         self.last_action: str | None = None
         self.last_seek_seconds: float | None = None
+        self.holding_for_buffer: bool = False
+        self.last_programmatic_seek_ts: float = 0.0
+        self.last_user_seek_ts: float = 0.0
+        self.last_user_pause_ts: float = 0.0
 
     def onPlayBackPaused(self) -> None:
         self.last_action = "pause"
+        if self.holding_for_buffer:
+            return
+        self.last_user_pause_ts = time.time()
         send_player_control("pause")
 
     def onPlayBackResumed(self) -> None:
         self.last_action = "resume"
+        self.holding_for_buffer = False
         send_player_control("resume")
 
     def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
+        now = time.time()
+        if (now - self.last_programmatic_seek_ts) < 1.2:
+            return
         self.last_action = "seek"
+        self.last_user_seek_ts = now
         self.last_seek_seconds = float(time_ms) / 1000.0
-        send_player_control("seek", int(self.last_seek_seconds))
+        if seek_offset != 0:
+            send_player_control("seek_by", int(round(float(seek_offset) / 1000.0)))
+        else:
+            send_player_control("seek", int(self.last_seek_seconds))
 
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
+        self.holding_for_buffer = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
 
     def onPlayBackEnded(self) -> None:
         self.last_action = "ended"
+        self.holding_for_buffer = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
@@ -161,11 +178,32 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if mylist_titles:
             self.rpc.sync_mylist_to_kodi_favourites(mylist_titles)
 
+        for proj in self.store.list_projections(provider="netflix"):
+            pb = self.store.get_playback_state(proj.title_id)
+            if pb and (pb.position_seconds > 5 or pb.play_count > 0):
+                title_obj = self.store.get_title(proj.title_id)
+                if title_obj:
+                    self._sync_title_bookmark_to_kodi(title_obj, pb)
+
         if result.requires_kodi_scan:
             self.rpc.request_targeted_scan()
         if result.requires_kodi_clean:
             self.rpc.request_targeted_clean()
         return result
+
+    def _sync_title_bookmark_to_kodi(self, title: Title, pb: PlaybackState) -> None:
+        """Resolve `kodi_db_id` if needed and push `PlaybackState` resume/playcount into Kodi's library."""
+        proj = self.store.get_projection(title.title_id, provider="netflix")
+        if proj is None:
+            return
+        db_id = proj.kodi_db_id
+        if db_id is None:
+            db_id = self.rpc.resolve_kodi_db_id(title, relative_path=proj.relative_path)
+            if db_id is not None:
+                proj.kodi_db_id = db_id
+                self.store.upsert_projection(proj)
+        if db_id is not None:
+            self.rpc.sync_playback_state_to_kodi(title, pb, kodi_db_id=db_id)
 
     def run_startup_sync(self, now: float | None = None) -> ReconciliationResult:
         """Perform initial provider reconciliation on service startup."""
@@ -234,7 +272,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.kodi.log("Video library clean finished", level="info")
 
     def poll_live_telemetry(self) -> None:
-        """Read live HTML5 `<video>` telemetry from `StreamBridge.Player` and persist duration/progress."""
+        """Read live HTML5 `<video>` telemetry from `StreamBridge.Player` and keep Kodi in real-time parity."""
         telemetry = read_live_telemetry()
         if not telemetry:
             return
@@ -246,14 +284,45 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if not active_title_id:
             return
 
+        now = time.time()
         pos = float(telemetry.get("position_seconds") or 0.0)
         dur = float(telemetry.get("duration_seconds") or 0.0)
+        updated_at = float(telemetry.get("updated_at") or 0.0)
         raw_state = str(telemetry.get("state") or "playing").lower()
+
+        is_hung_or_buffering = (raw_state in ("launching", "buffering")) or (
+            updated_at > 0.0 and (now - updated_at) > 2.5
+        )
+        if IN_KODI and xbmc is not None:
+            try:
+                kodi_paused = bool(xbmc.getCondVisibility("Player.Paused"))
+                if is_hung_or_buffering and not kodi_paused:
+                    self.player_monitor.holding_for_buffer = True
+                    xbmc.Player().pause()
+                elif raw_state == "playing" and self.player_monitor.holding_for_buffer:
+                    self.player_monitor.holding_for_buffer = False
+                    if kodi_paused:
+                        xbmc.Player().pause()
+
+                if (
+                    raw_state == "playing"
+                    and pos > 0.5
+                    and (now - self.player_monitor.last_user_seek_ts) > 2.0
+                ):
+                    kodi_pos = float(xbmc.Player().getTime())
+                    if abs(kodi_pos - pos) > 2.5:
+                        self.player_monitor.last_programmatic_seek_ts = now
+                        xbmc.Player().seekTime(pos)
+            except Exception as exc:
+                self.kodi.log(f"Player parity sync skipped: {exc}", level="debug")
+
         if dur <= 0:
             return
 
         state_enum = (
-            PlaybackSessionState.PAUSED
+            PlaybackSessionState.BUFFERING
+            if is_hung_or_buffering
+            else PlaybackSessionState.PAUSED
             if raw_state == "paused"
             else PlaybackSessionState.STOPPED
             if raw_state == "stopped"
@@ -270,9 +339,11 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.store.upsert_playback_state(pb)
 
         title = self.store.get_title(active_title_id)
-        if title and dur > 60 and title.runtime_seconds != int(dur):
-            title.runtime_seconds = int(dur)
-            self.store.upsert_title(title)
+        if title:
+            if dur > 60 and title.runtime_seconds != int(dur):
+                title.runtime_seconds = int(dur)
+                self.store.upsert_title(title)
+            self._sync_title_bookmark_to_kodi(title, pb)
 
     def sync_osd_cutout_mode(self) -> None:
         """Dynamically adjust `StreamBridge.Player` window region (`WM_APP + 4`) when Kodi's OSD is visible."""
@@ -305,7 +376,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             if playing:
                 self.sync_osd_cutout_mode()
                 now = time.time()
-                if (now - self._last_telemetry_poll) >= 2.0:
+                if (now - self._last_telemetry_poll) >= 0.25:
                     self._last_telemetry_poll = now
                     self.poll_live_telemetry()
             else:

@@ -5,6 +5,7 @@
 #include <shlwapi.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -120,17 +121,46 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         });
     }
 
+    function getCadmiumPlayer() {
+        try {
+            const vp = window.netflix &&
+                window.netflix.appContext &&
+                window.netflix.appContext.state &&
+                window.netflix.appContext.state.playerApp &&
+                window.netflix.appContext.state.playerApp.getAPI &&
+                window.netflix.appContext.state.playerApp.getAPI().videoPlayer;
+            if (!vp) return null;
+            const sids = vp.getAllPlayerSessionIds();
+            return (sids && sids.length) ? vp.getVideoPlayerBySessionId(sids[0]) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     window.__streambridgeControl = function(action, value) {
         const v = document.querySelector('video');
-        if (!v) return;
+        const player = getCadmiumPlayer();
         if (action === 'pause') {
             window.__sbUserPaused = true;
-            v.pause();
+            if (player && typeof player.pause === 'function') player.pause();
+            else if (v) v.pause();
         } else if (action === 'resume' || action === 'play') {
             window.__sbUserPaused = false;
-            v.play();
+            if (player && typeof player.play === 'function') player.play();
+            else if (v) v.play();
         } else if (action === 'seek' && typeof value === 'number') {
-            v.currentTime = value;
+            const targetMs = Math.max(0, Math.round(value * 1000));
+            if (player && typeof player.seek === 'function') {
+                player.seek(targetMs);
+            }
+        } else if (action === 'seek_by' && typeof value === 'number') {
+            const curMs = (player && typeof player.getCurrentTime === 'function')
+                ? player.getCurrentTime()
+                : ((v ? (v.currentTime || 0.0) : 0.0) * 1000.0);
+            const targetMs = Math.max(0, Math.round(curMs + value * 1000.0));
+            if (player && typeof player.seek === 'function') {
+                player.seek(targetMs);
+            }
         }
     };
 
@@ -142,22 +172,46 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         }
         const v = document.querySelector('video');
         if (!v || !window.chrome || !window.chrome.webview) return;
+        const player = getCadmiumPlayer();
+
+        // Auto-start playback once video buffer is ready unless user explicitly paused
+        if (v.paused && !window.__sbUserPaused && !v.ended && v.readyState >= 2) {
+            if (player && typeof player.play === 'function') {
+                try { player.play(); } catch (e) {}
+            }
+            try { v.play(); } catch (e) {}
+            const playBtn = document.querySelector('[data-uia="control-play-pause-play"]');
+            if (playBtn) {
+                try { playBtn.click(); } catch (e) {}
+            }
+        }
+
+        const posSec = (player && typeof player.getCurrentTime === 'function')
+            ? (player.getCurrentTime() / 1000.0)
+            : (v.currentTime || 0.0);
+        const durSec = (player && typeof player.getDuration === 'function' && player.getDuration() > 0)
+            ? (player.getDuration() / 1000.0)
+            : ((v.duration && isFinite(v.duration)) ? v.duration : 0.0);
+        const isBusy = (player && typeof player.getBusy === 'function' && player.getBusy() !== null) || (v.readyState < 3);
+        const isPaused = (player && typeof player.isPaused === 'function') ? player.isPaused() : v.paused;
+
         let state = stateOverride;
         if (!state) {
             if (v.ended) state = 'stopped';
-            else if (v.paused) state = 'paused';
-            else if (v.readyState < 3) state = 'buffering';
+            else if (isBusy && !window.__sbUserPaused) state = 'buffering';
+            else if (isPaused) state = 'paused';
             else state = 'playing';
         }
         const msg = JSON.stringify({
             state: state,
-            position_seconds: v.currentTime || 0.0,
-            duration_seconds: (v.duration && isFinite(v.duration)) ? v.duration : 0.0
+            position_seconds: posSec || 0.0,
+            duration_seconds: durSec || 0.0,
+            updated_at: Date.now() / 1000.0
         });
         window.chrome.webview.postMessage(msg);
     }
 
-    setInterval(() => postTelemetry(null), 1000);
+    setInterval(() => postTelemetry(null), 250);
     document.addEventListener('ended', () => postTelemetry('stopped'), true);
 })();
 )JS";
@@ -362,6 +416,13 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                 }
             }
             return 0;
+        case WM_APP + 5:
+            if (ctx && ctx->webview) {
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek_by', " +
+                                  std::to_wstring(static_cast<long long>(lparam)) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE || wparam == VK_BROWSER_BACK || wparam == VK_MEDIA_STOP) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -543,10 +604,18 @@ bool RunInteractiveWebView2Window(
         ctx.on_state_change("launching", 0.0, 0.0);
     }
 
+    SetEnvironmentVariableW(
+        L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        L"--autoplay-policy=no-user-gesture-required");
+    auto env_options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    if (env_options) {
+        env_options->put_AdditionalBrowserArguments(L"--autoplay-policy=no-user-gesture-required");
+    }
+
     HRESULT hr_wv = CreateCoreWebView2EnvironmentWithOptions(
         nullptr,
         profile_dir.empty() ? nullptr : profile_dir.c_str(),
-        nullptr,
+        env_options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [&ctx](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                 if (FAILED(result) || !env) {
@@ -798,6 +867,7 @@ bool ExportNetflixMyListToJson(
         setTimeout(() => {
             const seen = new Set();
             const items = [];
+            const bookmarks = [];
             const links = document.querySelectorAll('a[href*="/watch/"], a[href*="/title/"]');
             for (const a of links) {
                 const href = a.getAttribute('href') || '';
@@ -808,8 +878,31 @@ bool ExportNetflixMyListToJson(
                     items.push({ provider_content_id: m[1], title: label || ('Netflix #' + m[1]) });
                 }
             }
+            try {
+                const videos = window.netflix &&
+                    window.netflix.reactContext &&
+                    window.netflix.reactContext.models &&
+                    window.netflix.reactContext.models.falcorCache &&
+                    window.netflix.reactContext.models.falcorCache.videos;
+                if (videos && typeof videos === 'object') {
+                    for (const [vid, vnode] of Object.entries(videos)) {
+                        if (!vnode || typeof vnode !== 'object') continue;
+                        const bm = vnode.bookmark && vnode.bookmark.value;
+                        const rt = vnode.runtime && vnode.runtime.value;
+                        const posSec = bm && typeof bm.bookmarkPosition === 'number' ? bm.bookmarkPosition : 0;
+                        const durSec = typeof rt === 'number' ? rt : 0;
+                        if (posSec > 5) {
+                            bookmarks.push({
+                                provider_content_id: String(vid),
+                                position_seconds: posSec,
+                                duration_seconds: durSec
+                            });
+                        }
+                    }
+                }
+            } catch (e) {}
             if (window.chrome && window.chrome.webview) {
-                window.chrome.webview.postMessage(JSON.stringify({ items: items }));
+                window.chrome.webview.postMessage(JSON.stringify({ items: items, bookmarks: bookmarks }));
             }
         }, 1800);
     })();

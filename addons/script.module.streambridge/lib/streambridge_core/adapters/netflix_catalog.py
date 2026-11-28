@@ -29,6 +29,8 @@ from ..models import (
     LaunchDescriptor,
     MediaType,
     Offer,
+    PlaybackSessionState,
+    PlaybackState,
     SnapshotCompleteness,
     Title,
 )
@@ -252,6 +254,7 @@ class NetflixCatalogAdapter(ProviderAdapter):
         self.timeout_seconds = timeout_seconds
         self.companion_exe_path = companion_exe_path
         self.my_list_content_ids: set[str] = set(my_list_content_ids or ())
+        self.server_bookmarks: dict[str, tuple[float, float]] = {}
         self.catalog_limit = catalog_limit
         self._last_refresh: float | None = None
         self._last_error: str | None = None
@@ -291,6 +294,12 @@ class NetflixCatalogAdapter(ProviderAdapter):
                     cid = str(item.get("provider_content_id", "")).strip()
                     if cid:
                         self.my_list_content_ids.add(cid)
+                for bm in data.get("bookmarks", []):
+                    bm_cid = str(bm.get("provider_content_id", "")).strip()
+                    pos_s = float(bm.get("position_seconds") or 0.0)
+                    dur_s = float(bm.get("duration_seconds") or 0.0)
+                    if bm_cid and pos_s > 5.0:
+                        self.server_bookmarks[bm_cid] = (pos_s, dur_s)
                 return items
         except Exception as exc:
             logger.warning("My List companion extraction skipped: %s", redact_secrets(str(exc)))
@@ -553,6 +562,21 @@ class NetflixCatalogAdapter(ProviderAdapter):
                 availability=AvailabilityState.AVAILABLE,
             )
             items.append(CatalogItem(title=ml_title, offer=ml_offer))
+
+        for item in items:
+            bm = self.server_bookmarks.get(item.offer.provider_content_id)
+            if bm:
+                pos_s, dur_s = bm
+                pb = self.store.get_playback_state(item.title.title_id) or PlaybackState(
+                    title_id=item.title.title_id
+                )
+                pb.position_seconds = pos_s
+                if dur_s > 60:
+                    pb.duration_seconds = dur_s
+                elif item.title.runtime_seconds and item.title.runtime_seconds > 60:
+                    pb.duration_seconds = float(item.title.runtime_seconds)
+                pb.last_state = PlaybackSessionState.PAUSED
+                self.store.upsert_playback_state(pb)
 
         self._last_refresh = time.time()
         self._last_error = None

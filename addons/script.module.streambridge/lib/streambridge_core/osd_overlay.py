@@ -27,9 +27,9 @@ CHROMA_KEY_RGB: tuple[int, int, int] = (1, 2, 1)
 def generate_chroma_key_avi(
     output_path: Path,
     duration_seconds: int = 120,
-    fps: int = 2,
-    width: int = 4,
-    height: int = 4,
+    fps: int = 4,
+    width: int = 2,
+    height: int = 2,
     rgb: tuple[int, int, int] = CHROMA_KEY_RGB,
 ) -> Path:
     """Write a minimal, valid uncompressed 24-bit BI_RGB RIFF AVI file with 0 audio tracks."""
@@ -202,6 +202,8 @@ def send_player_control(action: str, value_seconds: int = 0) -> bool:
         return bool(user32.PostMessageW(hwnd, WM_APP + 3, max(0, int(value_seconds)), 0))
     if act == "osd_mode":
         return bool(user32.PostMessageW(hwnd, WM_APP + 4, max(0, int(value_seconds)), 0))
+    if act == "seek_by":
+        return bool(user32.PostMessageW(hwnd, WM_APP + 5, 0, int(value_seconds)))
     if act in ("stop", "ended", "close"):
         return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
     return False

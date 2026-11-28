@@ -244,6 +244,44 @@ class KodiJsonRpcClient:
             return True
         return False
 
+    def resolve_kodi_db_id(self, title: Title, relative_path: str | None = None) -> int | None:
+        """Resolve Kodi's internal `movieid` or `episodeid` for a scraped `.strm` item via JSON-RPC."""
+        filename = Path(relative_path).name if relative_path else f"{title.title}"
+        try:
+            if title.media_type == MediaType.MOVIE:
+                res = self.call(
+                    "VideoLibrary.GetMovies",
+                    {
+                        "filter": {
+                            "field": "filename",
+                            "operator": "contains",
+                            "value": filename,
+                        }
+                    },
+                )
+                if isinstance(res, dict):
+                    movies = res.get("movies") or []
+                    if movies and isinstance(movies[0], dict) and movies[0].get("movieid") is not None:
+                        return int(movies[0]["movieid"])
+            elif title.media_type == MediaType.EPISODE:
+                res = self.call(
+                    "VideoLibrary.GetEpisodes",
+                    {
+                        "filter": {
+                            "field": "filename",
+                            "operator": "contains",
+                            "value": filename,
+                        }
+                    },
+                )
+                if isinstance(res, dict):
+                    episodes = res.get("episodes") or []
+                    if episodes and isinstance(episodes[0], dict) and episodes[0].get("episodeid") is not None:
+                        return int(episodes[0]["episodeid"])
+        except Exception:
+            return None
+        return None
+
     def sync_playback_state_to_kodi(
         self, title: Title, state: PlaybackState, kodi_db_id: int | None = None
     ) -> bool:
