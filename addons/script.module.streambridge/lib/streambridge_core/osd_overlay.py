@@ -204,6 +204,10 @@ def send_player_control(action: str, value_seconds: int = 0) -> bool:
         return bool(user32.PostMessageW(hwnd, WM_APP + 4, max(0, int(value_seconds)), 0))
     if act == "seek_by":
         return bool(user32.PostMessageW(hwnd, WM_APP + 5, 0, int(value_seconds)))
+    if act == "set_subtitle":
+        return bool(user32.PostMessageW(hwnd, WM_APP + 6, max(0, int(value_seconds)), 0))
+    if act == "set_audio":
+        return bool(user32.PostMessageW(hwnd, WM_APP + 7, max(0, int(value_seconds)), 0))
     if act in ("stop", "ended", "close"):
         return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
     return False

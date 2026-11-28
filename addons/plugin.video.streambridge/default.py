@@ -226,6 +226,7 @@ class StreamBridgePluginApp:
         profile: str = "default",
         preferred_backend: str = "auto",
         wait_for_exit: bool = True,
+        start_from_beginning: bool = False,
     ) -> PlaybackSessionResult:
         return self.broker.play_title(
             adapter=self.adapter,
@@ -233,6 +234,7 @@ class StreamBridgePluginApp:
             profile=profile,
             preferred_backend=preferred_backend,
             wait_for_exit=wait_for_exit,
+            start_from_beginning=start_from_beginning,
         )
 
     def clear_auth_session(self, base_dir: Path | None = None) -> bool:
@@ -526,14 +528,29 @@ def browse_provider_filtered(provider_id: str, media_filter: str) -> list[dict[s
 def play_route(title_id: str) -> PlaybackSessionResult:
     app = get_app()
     in_kodi_player = bool(IN_KODI and plugin.handle >= 0)
-    result = app.play(title_id=title_id, wait_for_exit=not in_kodi_player)
+    pb_state = app.store.get_playback_state(title_id)
+    explicit_no_resume = any(str(a).strip().lower() == "resume:false" for a in sys.argv[3:])
+    start_over = bool(
+        in_kodi_player
+        and explicit_no_resume
+        and pb_state is not None
+        and pb_state.position_seconds > 10.0
+    )
+    if start_over and pb_state is not None:
+        pb_state.position_seconds = 0.0
+        app.store.upsert_playback_state(pb_state)
+
+    result = app.play(
+        title_id=title_id,
+        wait_for_exit=not in_kodi_player,
+        start_from_beginning=start_over,
+    )
     if in_kodi_player:
         import xbmcgui  # type: ignore[import-not-found]
         import xbmcplugin  # type: ignore[import-not-found]
 
         proxy_path = app.kodi.get_profile_dir() / "osd_proxy_key.avi"
         title_obj = app.store.get_title(title_id)
-        pb_state = app.store.get_playback_state(title_id)
         if title_obj is not None:
             offers = app.store.get_offers_for_title(title_id, provider="netflix")
             meta = app.kodi.build_listitem_metadata(

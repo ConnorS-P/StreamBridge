@@ -57,6 +57,8 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_programmatic_seek_ts: float = 0.0
         self.last_user_seek_ts: float = 0.0
         self.last_user_pause_ts: float = 0.0
+        self.last_known_netflix_pos: float = 0.0
+        self.last_known_netflix_dur: float = 0.0
 
     def onPlayBackPaused(self) -> None:
         self.last_action = "pause"
@@ -76,11 +78,42 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
             return
         self.last_action = "seek"
         self.last_user_seek_ts = now
-        self.last_seek_seconds = float(time_ms) / 1000.0
+        target_sec = float(time_ms) / 1000.0
+        self.last_seek_seconds = target_sec
+
+        # Intercept chapterless '>>' (SkipNext to end) and '<<' (SkipPrevious to 0:00) on Kodi's M OSD bar
+        if (
+            self.last_known_netflix_dur > 60.0
+            and target_sec >= (self.last_known_netflix_dur - 15.0)
+            and seek_offset > 120000
+        ):
+            new_pos = min(self.last_known_netflix_dur - 5.0, self.last_known_netflix_pos + 30.0)
+            self.last_known_netflix_pos = new_pos
+            send_player_control("seek_by", 30)
+            if IN_KODI and xbmc is not None:
+                try:
+                    self.last_programmatic_seek_ts = time.time()
+                    xbmc.Player().seekTime(new_pos)
+                except Exception as exc:
+                    self.kodi.log(f"SkipNext clamp seekTime skipped: {exc}", level="debug")
+            return
+
+        if target_sec <= 2.0 and seek_offset < -60000 and self.last_known_netflix_pos > 15.0:
+            new_pos = max(0.0, self.last_known_netflix_pos - 30.0)
+            self.last_known_netflix_pos = new_pos
+            send_player_control("seek_by", -30)
+            if IN_KODI and xbmc is not None:
+                try:
+                    self.last_programmatic_seek_ts = time.time()
+                    xbmc.Player().seekTime(new_pos)
+                except Exception as exc:
+                    self.kodi.log(f"SkipPrev clamp seekTime skipped: {exc}", level="debug")
+            return
+
         if seek_offset != 0:
             send_player_control("seek_by", int(round(float(seek_offset) / 1000.0)))
         else:
-            send_player_control("seek", int(self.last_seek_seconds))
+            send_player_control("seek", int(target_sec))
 
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
@@ -154,6 +187,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self.sync_runs: list[ReconciliationResult] = []
         self.last_sync_timestamp: float = 0.0
         self._last_telemetry_poll: float = 0.0
+        self._last_bookmark_sync_ts: float = 0.0
         self._last_osd_mode: int = -1
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
 
@@ -290,6 +324,11 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         updated_at = float(telemetry.get("updated_at") or 0.0)
         raw_state = str(telemetry.get("state") or "playing").lower()
 
+        if pos > 0:
+            self.player_monitor.last_known_netflix_pos = pos
+        if dur > 0:
+            self.player_monitor.last_known_netflix_dur = dur
+
         is_hung_or_buffering = (raw_state in ("launching", "buffering")) or (
             updated_at > 0.0 and (now - updated_at) > 2.5
         )
@@ -343,17 +382,29 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             if dur > 60 and title.runtime_seconds != int(dur):
                 title.runtime_seconds = int(dur)
                 self.store.upsert_title(title)
-            self._sync_title_bookmark_to_kodi(title, pb)
+            if (now - self._last_bookmark_sync_ts) >= 15.0 or state_enum != PlaybackSessionState.PLAYING:
+                self._last_bookmark_sync_ts = now
+                self._sync_title_bookmark_to_kodi(title, pb)
 
     def sync_osd_cutout_mode(self) -> None:
-        """Dynamically adjust `StreamBridge.Player` window region (`WM_APP + 4`) when Kodi's OSD is visible."""
+        """Dynamically adjust `StreamBridge.Player` alpha blend (`WM_APP + 4`) and bridge Subtitle/Audio OSD menus."""
         if not (IN_KODI and xbmc is not None):
             return
+
+        if xbmc.getCondVisibility("Window.IsVisible(osdsubtitlesettings)"):
+            xbmc.executebuiltin("Dialog.Close(osdsubtitlesettings,true)")
+            self._open_cadmium_track_picker(track_key="subtitles", control_action="set_subtitle", heading="StreamBridge — Select Subtitles")
+            return
+
+        if xbmc.getCondVisibility("Window.IsVisible(osdaudiosettings)"):
+            xbmc.executebuiltin("Dialog.Close(osdaudiosettings,true)")
+            self._open_cadmium_track_picker(track_key="audio_tracks", control_action="set_audio", heading="StreamBridge — Select Audio Track")
+            return
+
         full_modal = bool(
             xbmc.getCondVisibility(
-                "Window.IsVisible(osdvideosettings) | Window.IsVisible(osdaudiosettings) | "
-                "Window.IsVisible(osdsubtitlesettings) | Window.IsVisible(videobookmarks) | "
-                "Window.IsVisible(fullscreeninfo)"
+                "Window.IsVisible(osdvideosettings) | Window.IsVisible(videobookmarks) | "
+                "Window.IsVisible(fullscreeninfo) | Window.IsVisible(selectdialog)"
             )
         )
         osd_bar = bool(xbmc.getCondVisibility("Window.IsVisible(videoosd) | Window.IsVisible(seekbar)"))
@@ -361,6 +412,39 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if mode != self._last_osd_mode:
             self._last_osd_mode = mode
             send_player_control("osd_mode", mode)
+
+    def _open_cadmium_track_picker(self, track_key: str, control_action: str, heading: str) -> None:
+        """Present a native Kodi `Dialog().select(...)` listing live Netflix Cadmium subtitle or audio tracks."""
+        if not (IN_KODI and xbmc is not None):
+            return
+        try:
+            import xbmcgui  # type: ignore[import-not-found]
+
+            telemetry = read_live_telemetry() or {}
+            tracks = telemetry.get(track_key) or []
+            if not isinstance(tracks, list) or not tracks:
+                self.kodi.notify(heading, "No alternate tracks reported by stream yet.")
+                return
+            labels: list[str] = []
+            preselect = 0
+            for i, trk in enumerate(tracks):
+                if not isinstance(trk, dict):
+                    continue
+                lbl = str(trk.get("label") or f"Track {i + 1}")
+                is_act = bool(trk.get("active"))
+                if is_act:
+                    preselect = i
+                    labels.append(f"[B]* {lbl} (Active)[/B]")
+                else:
+                    labels.append(lbl)
+            self._last_osd_mode = 2
+            send_player_control("osd_mode", 2)
+            chosen = xbmcgui.Dialog().select(heading, labels, preselect=preselect)
+            if chosen is not None and chosen >= 0 and chosen < len(tracks):
+                target_idx = int(tracks[chosen].get("index", chosen))
+                send_player_control(control_action, target_idx)
+        except Exception as exc:
+            self.kodi.log(f"Track picker error ({track_key}): {exc}", level="warning")
 
     def run_forever(self) -> None:
         sched = self.kodi.load_sync_schedule_settings()

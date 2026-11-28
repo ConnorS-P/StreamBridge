@@ -95,10 +95,10 @@ const wchar_t* kNetflixLoginNavigationScript = LR"JS(
 })();
 )JS";
 
-const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
+const wchar_t* kNetflixCadmiumControlScript = LR"JS(
 (function() {
-    if (window.__sbInjected) return;
-    window.__sbInjected = true;
+    if (window.__sbControlInjected) return;
+    window.__sbControlInjected = true;
 
     const style = document.createElement('style');
     style.textContent = `
@@ -107,9 +107,22 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         .watch-video--flag-container,
         .evidence-overlay,
         .PlayerControlsNeo__layout,
-        .nf-player-container .controls {
+        .nf-player-container .controls,
+        .WatchNext-background,
+        [data-uia*="postplay-background"],
+        .OriginalsPostPlay-BackgroundTrailer,
+        .SeamlessControls--container {
+            display: none !important;
             opacity: 0 !important;
             pointer-events: none !important;
+        }
+        .NFPlayer.postplay-mini-player {
+            width: 100vw !important;
+            height: 100vh !important;
+            top: 0 !important;
+            left: 0 !important;
+            position: fixed !important;
+            z-index: 9999 !important;
         }
         body { cursor: none !important; overflow: hidden !important; background-color: #000 !important; }
     `;
@@ -121,7 +134,7 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         });
     }
 
-    function getCadmiumPlayer() {
+    window.__getCadmiumPlayer = function() {
         try {
             const vp = window.netflix &&
                 window.netflix.appContext &&
@@ -135,11 +148,11 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         } catch (e) {
             return null;
         }
-    }
+    };
 
     window.__streambridgeControl = function(action, value) {
         const v = document.querySelector('video');
-        const player = getCadmiumPlayer();
+        const player = window.__getCadmiumPlayer ? window.__getCadmiumPlayer() : null;
         if (action === 'pause') {
             window.__sbUserPaused = true;
             if (player && typeof player.pause === 'function') player.pause();
@@ -150,19 +163,32 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
             else if (v) v.play();
         } else if (action === 'seek' && typeof value === 'number') {
             const targetMs = Math.max(0, Math.round(value * 1000));
-            if (player && typeof player.seek === 'function') {
-                player.seek(targetMs);
-            }
+            if (player && typeof player.seek === 'function') player.seek(targetMs);
         } else if (action === 'seek_by' && typeof value === 'number') {
             const curMs = (player && typeof player.getCurrentTime === 'function')
                 ? player.getCurrentTime()
                 : ((v ? (v.currentTime || 0.0) : 0.0) * 1000.0);
             const targetMs = Math.max(0, Math.round(curMs + value * 1000.0));
-            if (player && typeof player.seek === 'function') {
-                player.seek(targetMs);
+            if (player && typeof player.seek === 'function') player.seek(targetMs);
+        } else if (action === 'set_subtitle' && typeof value === 'number' && player && typeof player.getTimedTextTrackList === 'function') {
+            const subs = player.getTimedTextTrackList() || [];
+            if (value >= 0 && value < subs.length && typeof player.setTimedTextTrack === 'function') {
+                player.setTimedTextTrack(subs[value]);
+            }
+        } else if (action === 'set_audio' && typeof value === 'number' && player && typeof player.getAudioTrackList === 'function') {
+            const auds = player.getAudioTrackList() || [];
+            if (value >= 0 && value < auds.length && typeof player.setAudioTrack === 'function') {
+                player.setAudioTrack(auds[value]);
             }
         }
     };
+})();
+)JS";
+
+const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
+(function() {
+    if (window.__sbInjected) return;
+    window.__sbInjected = true;
 
     function postTelemetry(stateOverride) {
         const profileLink = document.querySelector('a.profile-link, [data-uia="action-select-profile+primary"]');
@@ -170,11 +196,34 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
             window.__sbProfileClicked = true;
             profileLink.click();
         }
-        const v = document.querySelector('video');
-        if (!v || !window.chrome || !window.chrome.webview) return;
-        const player = getCadmiumPlayer();
 
-        // Auto-start playback once video buffer is ready unless user explicitly paused
+        const watchCreditsBtn = document.querySelector(
+            '[data-uia="watch-credits-seamless-button"], [data-uia="postplay-MinimizedItem"], .WatchNext-still-hover-container, .WatchNext-still-container, .postplay-still-container'
+        );
+        if (watchCreditsBtn) {
+            try { watchCreditsBtn.click(); } catch (e) {}
+        }
+
+        const allVideos = Array.from(document.querySelectorAll('video'));
+        if (allVideos.length > 1) {
+            for (let i = 1; i < allVideos.length; ++i) {
+                try {
+                    allVideos[i].muted = true;
+                    allVideos[i].pause();
+                    allVideos[i].remove();
+                } catch (e) {}
+            }
+        }
+
+        const v = allVideos[0] || document.querySelector('video');
+        if (!v || !window.chrome || !window.chrome.webview) return;
+        const player = window.__getCadmiumPlayer ? window.__getCadmiumPlayer() : null;
+
+        if (window.__sbStartFromBeginning && !window.__sbStartFromBeginningDone && player && typeof player.seek === 'function' && v.readyState >= 2) {
+            window.__sbStartFromBeginningDone = true;
+            try { player.seek(0); } catch (e) {}
+        }
+
         if (v.paused && !window.__sbUserPaused && !v.ended && v.readyState >= 2) {
             if (player && typeof player.play === 'function') {
                 try { player.play(); } catch (e) {}
@@ -195,6 +244,31 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         const isBusy = (player && typeof player.getBusy === 'function' && player.getBusy() !== null) || (v.readyState < 3);
         const isPaused = (player && typeof player.isPaused === 'function') ? player.isPaused() : v.paused;
 
+        const subtitles = [];
+        const audioTracks = [];
+        try {
+            if (player && typeof player.getTimedTextTrackList === 'function') {
+                const curSub = typeof player.getTimedTextTrack === 'function' ? player.getTimedTextTrack() : null;
+                const rawSubs = player.getTimedTextTrackList() || [];
+                rawSubs.forEach((t, idx) => {
+                    if (!t) return;
+                    const lbl = t.isNoneTrack ? 'Off' : (t.displayName || t.bcp47 || ('Subtitle ' + (idx + 1)));
+                    const isAct = Boolean(curSub && curSub.trackId === t.trackId);
+                    subtitles.push({ index: idx, label: String(lbl), active: isAct });
+                });
+            }
+            if (player && typeof player.getAudioTrackList === 'function') {
+                const curAud = typeof player.getAudioTrack === 'function' ? player.getAudioTrack() : null;
+                const rawAuds = player.getAudioTrackList() || [];
+                rawAuds.forEach((t, idx) => {
+                    if (!t) return;
+                    const lbl = t.displayName || t.bcp47 || ('Audio ' + (idx + 1));
+                    const isAct = Boolean(curAud && curAud.trackId === t.trackId);
+                    audioTracks.push({ index: idx, label: String(lbl), active: isAct });
+                });
+            }
+        } catch (e) {}
+
         let state = stateOverride;
         if (!state) {
             if (v.ended) state = 'stopped';
@@ -206,7 +280,9 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
             state: state,
             position_seconds: posSec || 0.0,
             duration_seconds: durSec || 0.0,
-            updated_at: Date.now() / 1000.0
+            updated_at: Date.now() / 1000.0,
+            subtitles: subtitles,
+            audio_tracks: audioTracks
         });
         window.chrome.webview.postMessage(msg);
     }
@@ -396,22 +472,23 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             return 0;
         case WM_APP + 4:
             if (ctx && !ctx->is_login_session) {
-                RECT rc = {};
-                GetClientRect(hwnd, &rc);
-                int kw = rc.right - rc.left;
-                int kh = rc.bottom - rc.top;
+                SetWindowRgn(hwnd, nullptr, TRUE);
+                LONG_PTR ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 if (wparam == 2) {
-                    ShowWindow(hwnd, SW_HIDE);
-                } else if (wparam == 1 && kw > 0 && kh > 0) {
-                    HRGN rgn = CreateRectRgn(
-                        0,
-                        static_cast<int>(kh * 0.14),
-                        kw,
-                        static_cast<int>(kh * 0.68));
-                    SetWindowRgn(hwnd, rgn, TRUE);
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED);
+                    SetLayeredWindowAttributes(hwnd, 0, 95, LWA_ALPHA);
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                } else if (wparam == 1) {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED);
+                    SetLayeredWindowAttributes(hwnd, 0, 140, LWA_ALPHA);
                     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 } else {
-                    SetWindowRgn(hwnd, nullptr, TRUE);
+                    if (ex_style & WS_EX_LAYERED) {
+                        SetWindowLongPtrW(
+                            hwnd,
+                            GWL_EXSTYLE,
+                            ex_style & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+                    }
                     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 }
             }
@@ -420,6 +497,20 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             if (ctx && ctx->webview) {
                 std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('seek_by', " +
                                   std::to_wstring(static_cast<long long>(lparam)) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
+        case WM_APP + 6:
+            if (ctx && ctx->webview) {
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('set_subtitle', " +
+                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
+        case WM_APP + 7:
+            if (ctx && ctx->webview) {
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('set_audio', " +
+                                  std::to_wstring(static_cast<long long>(wparam)) + L");";
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
@@ -690,6 +781,14 @@ bool RunInteractiveWebView2Window(
                                     &src_token);
                             } else {
                                 // Playback Mode: Wire <video> telemetry & auto-close if user clicks Netflix's Back arrow
+                                wchar_t start_over_env[8] = {};
+                                if (GetEnvironmentVariableW(L"STREAMBRIDGE_START_FROM_BEGINNING", start_over_env, 8) > 0 &&
+                                    start_over_env[0] == L'1') {
+                                    ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                        L"window.__sbStartFromBeginning = true;", nullptr);
+                                }
+                                ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                    kNetflixCadmiumControlScript, nullptr);
                                 ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                     kNetflixTelemetryAndOsdHideScript, nullptr);
 

@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
+    bool start_from_beginning = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -91,6 +92,8 @@ int main(int argc, char* argv[]) {
             self_test = true;
         } else if (arg == "--dry-run") {
             dry_run = true;
+        } else if (arg == "--start-from-beginning") {
+            start_from_beginning = true;
         } else if (arg == "--pipe" && i + 1 < argc) {
             pipe_name = Utf8ToWide(argv[++i]);
         } else if (arg == "--login" && i + 1 < argc) {
@@ -131,6 +134,9 @@ int main(int argc, char* argv[]) {
 
     if (!watch_url.empty()) {
         FreeConsole();
+        if (start_from_beginning) {
+            SetEnvironmentVariableW(L"STREAMBRIDGE_START_FROM_BEGINNING", L"1");
+        }
         std::string err;
         if (!streambridge::RunInteractiveWebView2Window(watch_url, false, nullptr, &err)) {
             return 1;
