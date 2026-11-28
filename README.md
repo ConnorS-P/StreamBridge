@@ -1,6 +1,9 @@
 # StreamBridge
 
-**Kodi-native subscription streaming library integration & source-direct playback broker (v0.1.0)**
+> [!WARNING]
+> **100% Vibe-Coded & Highly Experimental**: This repository is 100% vibe-coded and currently **highly experimental**. Granted, the vibes are good—and everything is gated by automated tests, strict compiler warnings (`/W4 /WX`), and type checks—but it is still thoroughly vibe-coded. Expect rapid iteration, sharp edges, and active architectural experimentation. Use at your own risk!
+
+**Kodi-native subscription streaming library integration & source-direct playback broker (v0.1.33)**
 
 StreamBridge makes subscription streaming services behave like ordinary Kodi video sources. Kodi owns the library, metadata, artwork, search, collections, Trakt/TMDb Helper integration, and viewing experience. Provider adapters supply licensed catalog availability and resolve selected titles to authorized playback, while `StreamBridge.Player` (on Windows x64) and cross-platform fallbacks (on Linux, macOS, Android, and LibreELEC) route playback cleanly without scraping login forms or compromising user credentials.
 

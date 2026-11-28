@@ -7,7 +7,6 @@
 #include <wrl.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
-#include <dcomp.h>
 #include <inspectable.h>
 #include <roapi.h>
 #include <winstring.h>
@@ -196,6 +195,9 @@ const wchar_t* kNetflixCadmiumControlScript = LR"JS(
             if (value >= 0 && value < auds.length && typeof player.setAudioTrack === 'function') {
                 player.setAudioTrack(auds[value]);
             }
+        } else if (action === 'set_rate' && typeof value === 'number') {
+            const rate = Math.max(0.25, Math.min(4.0, value / 100.0));
+            if (v) v.playbackRate = rate;
         } else if (action === 'osd_mode') {
             window.__sbOsdVisible = Boolean(value > 0);
         }
@@ -330,18 +332,14 @@ struct WebViewHostContext {
     ComPtr<ID3D11DeviceContext> d3d_context;
     ComPtr<ID3D11Texture2D> d3d_staging_tex;
     ComPtr<ID3D11Texture2D> d3d_last_frame_tex;
-    ComPtr<IDXGISwapChain1> dcomp_swapchain;
-    ComPtr<IDCompositionDevice> dcomp_device;
-    ComPtr<IDCompositionTarget> dcomp_target;
-    ComPtr<IDCompositionVisual> dcomp_visual;
-    std::vector<uint32_t> dcomp_cpu_buf;
     int staging_width = 0;
     int staging_height = 0;
     winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool wgc_frame_pool{nullptr};
     winrt::Windows::Graphics::Capture::GraphicsCaptureSession wgc_session{nullptr};
     bool wgc_initialized = false;
     int wgc_frames_captured = 0;
-    bool dcomp_present_ok = false;
+    bool last_ulw_ok = false;
+    uint32_t baseline_ref_px = 0;
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
     std::wstring initial_url;
@@ -441,11 +439,6 @@ void CleanupOsdOverlayResources(WebViewHostContext* ctx) {
         }
     } catch (...) {}
     ctx->wgc_initialized = false;
-    ctx->dcomp_visual.Reset();
-    ctx->dcomp_target.Reset();
-    ctx->dcomp_device.Reset();
-    ctx->dcomp_swapchain.Reset();
-    ctx->dcomp_cpu_buf.clear();
     ctx->d3d_last_frame_tex.Reset();
     ctx->d3d_staging_tex.Reset();
     ctx->d3d_context.Reset();
@@ -572,62 +565,43 @@ bool DrainWgcFramesToLatest(WebViewHostContext* ctx) {
             }
             frame.Close();
         }
+        if (got_new && ctx->osd_mode == 0 && ctx->d3d_last_frame_tex) {
+            D3D11_TEXTURE2D_DESC desc = {};
+            ctx->d3d_last_frame_tex->GetDesc(&desc);
+            int kw = static_cast<int>(desc.Width);
+            int kh = static_cast<int>(desc.Height);
+            if (kw > 0 && kh > 0) {
+                if (!ctx->d3d_staging_tex || ctx->staging_width != kw || ctx->staging_height != kh) {
+                    ctx->d3d_staging_tex.Reset();
+                    D3D11_TEXTURE2D_DESC st_desc = desc;
+                    st_desc.Usage = D3D11_USAGE_STAGING;
+                    st_desc.BindFlags = 0;
+                    st_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    st_desc.MiscFlags = 0;
+                    ctx->d3d_device->CreateTexture2D(&st_desc, nullptr, &ctx->d3d_staging_tex);
+                    ctx->staging_width = kw;
+                    ctx->staging_height = kh;
+                }
+                if (ctx->d3d_staging_tex) {
+                    ctx->d3d_context->CopyResource(ctx->d3d_staging_tex.Get(), ctx->d3d_last_frame_tex.Get());
+                    D3D11_MAPPED_SUBRESOURCE mapped = {};
+                    if (SUCCEEDED(ctx->d3d_context->Map(ctx->d3d_staging_tex.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+                        const uint8_t* src_base = static_cast<const uint8_t*>(mapped.pData);
+                        const uint32_t* mid_row = reinterpret_cast<const uint32_t*>(src_base + (kh / 2) * mapped.RowPitch);
+                        uint32_t px = mid_row[kw / 2];
+                        int r = static_cast<int>((px >> 16) & 0xFF);
+                        int g = static_cast<int>((px >> 8) & 0xFF);
+                        int b = static_cast<int>(px & 0xFF);
+                        if (g >= 24 && g <= 72 && std::abs(r - g) <= 4 && std::abs(g - b) <= 4) {
+                            ctx->baseline_ref_px = px;
+                        }
+                        ctx->d3d_context->Unmap(ctx->d3d_staging_tex.Get(), 0);
+                    }
+                }
+            }
+        }
     } catch (...) {}
     return got_new || (ctx->d3d_last_frame_tex != nullptr);
-}
-
-bool EnsureDCompOverlaySwapChain(WebViewHostContext* ctx, int kw, int kh) {
-    if (!ctx || !ctx->d3d_device || !ctx->osd_hwnd) return false;
-    if (ctx->dcomp_swapchain && ctx->osd_width == kw && ctx->osd_height == kh) return true;
-
-    ctx->dcomp_visual.Reset();
-    ctx->dcomp_target.Reset();
-    ctx->dcomp_device.Reset();
-    ctx->dcomp_swapchain.Reset();
-
-    ComPtr<IDXGIDevice> dxgi_dev;
-    ComPtr<IDXGIAdapter> adapter;
-    ComPtr<IDXGIFactory2> factory;
-    if (FAILED(ctx->d3d_device.As(&dxgi_dev)) || !dxgi_dev) return false;
-    if (FAILED(dxgi_dev->GetAdapter(&adapter)) || !adapter) return false;
-    if (FAILED(adapter->GetParent(IID_PPV_ARGS(&factory))) || !factory) return false;
-
-    DXGI_SWAP_CHAIN_DESC1 sc_desc = {};
-    sc_desc.Width = static_cast<UINT>(kw);
-    sc_desc.Height = static_cast<UINT>(kh);
-    sc_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    sc_desc.SampleDesc.Count = 1;
-    sc_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sc_desc.BufferCount = 2;
-    sc_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    sc_desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
-
-    if (FAILED(factory->CreateSwapChainForComposition(
-            ctx->d3d_device.Get(), &sc_desc, nullptr, &ctx->dcomp_swapchain)) ||
-        !ctx->dcomp_swapchain) {
-        return false;
-    }
-
-    if (FAILED(DCompositionCreateDevice(dxgi_dev.Get(), IID_PPV_ARGS(&ctx->dcomp_device))) ||
-        !ctx->dcomp_device) {
-        return false;
-    }
-    if (FAILED(ctx->dcomp_device->CreateTargetForHwnd(ctx->osd_hwnd, TRUE, &ctx->dcomp_target)) ||
-        !ctx->dcomp_target) {
-        return false;
-    }
-    if (FAILED(ctx->dcomp_device->CreateVisual(&ctx->dcomp_visual)) || !ctx->dcomp_visual) {
-        return false;
-    }
-    if (FAILED(ctx->dcomp_visual->SetContent(ctx->dcomp_swapchain.Get()))) return false;
-    if (FAILED(ctx->dcomp_target->SetRoot(ctx->dcomp_visual.Get()))) return false;
-    if (FAILED(ctx->dcomp_device->Commit())) return false;
-
-    ctx->dcomp_cpu_buf.resize(static_cast<size_t>(kw) * static_cast<size_t>(kh), 0);
-    ctx->osd_pixels = ctx->dcomp_cpu_buf.data();
-    ctx->osd_width = kw;
-    ctx->osd_height = kh;
-    return true;
 }
 
 void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
@@ -653,7 +627,34 @@ void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
             ctx->staging_height = kh;
         }
 
-        if (!EnsureDCompOverlaySwapChain(ctx, kw, kh)) return;
+        if (!ctx->osd_dib || ctx->osd_width != kw || ctx->osd_height != kh) {
+            if (ctx->osd_mem_dc) {
+                if (ctx->osd_old_bmp) SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
+                DeleteDC(ctx->osd_mem_dc);
+                ctx->osd_mem_dc = nullptr;
+            }
+            if (ctx->osd_dib) {
+                DeleteObject(ctx->osd_dib);
+                ctx->osd_dib = nullptr;
+            }
+            HDC screen_dc = GetDC(nullptr);
+            ctx->osd_mem_dc = CreateCompatibleDC(screen_dc);
+            BITMAPINFO bmi = {};
+            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth = kw;
+            bmi.bmiHeader.biHeight = -kh;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+            void* bits = nullptr;
+            ctx->osd_dib = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            ReleaseDC(nullptr, screen_dc);
+            if (!ctx->osd_dib || !bits) return;
+            ctx->osd_old_bmp = SelectObject(ctx->osd_mem_dc, ctx->osd_dib);
+            ctx->osd_pixels = static_cast<uint32_t*>(bits);
+            ctx->osd_width = kw;
+            ctx->osd_height = kh;
+        }
 
         ctx->d3d_context->CopyResource(ctx->d3d_staging_tex.Get(), ctx->d3d_last_frame_tex.Get());
         D3D11_MAPPED_SUBRESOURCE mapped = {};
@@ -663,12 +664,17 @@ void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
         int sample_y = kh / 5;
         const uint32_t* sample_row = reinterpret_cast<const uint32_t*>(src_base + sample_y * mapped.RowPitch);
         uint32_t p1 = sample_row[kw / 8];
-        uint32_t p2 = sample_row[kw - kw / 8];
-        uint32_t ref_px = ((p1 >> 8) & 0xFF) >= ((p2 >> 8) & 0xFF) ? p1 : p2;
+        uint32_t p2 = sample_row[kw / 2];
+        uint32_t p3 = sample_row[kw - kw / 8];
+        uint32_t live_bright = p1;
+        if (((p2 >> 8) & 0xFF) > ((live_bright >> 8) & 0xFF)) live_bright = p2;
+        if (((p3 >> 8) & 0xFF) > ((live_bright >> 8) & 0xFF)) live_bright = p3;
+
+        uint32_t ref_px = ctx->baseline_ref_px != 0 ? ctx->baseline_ref_px : live_bright;
         int kr = static_cast<int>((ref_px >> 16) & 0xFF);
         int kg = static_cast<int>((ref_px >> 8) & 0xFF);
         int kb = static_cast<int>(ref_px & 0xFF);
-        int k_dg_r = std::max(8, kg - kr);
+        int k_luma = std::max(16, (kr + kg + kb) / 3);
 
         for (int y = 0; y < kh; ++y) {
             const uint32_t* src_row = reinterpret_cast<const uint32_t*>(src_base + y * mapped.RowPitch);
@@ -678,47 +684,76 @@ void UpdateOsdLayeredWindowWgc(WebViewHostContext* ctx) {
                 int b = static_cast<int>(c & 0xFF);
                 int g = static_cast<int>((c >> 8) & 0xFF);
                 int r = static_cast<int>((c >> 16) & 0xFF);
-                int max_rgb = std::max(r, std::max(g, b));
 
-                if (max_rgb <= 5 || (std::abs(r - kr) <= 8 && std::abs(g - kg) <= 8 && std::abs(b - kb) <= 8)) {
+                int dr = r - kr;
+                int dg = g - kg;
+                int db = b - kb;
+                int max_diff = std::max(std::abs(dr), std::max(std::abs(dg), std::abs(db)));
+
+                // 1. Unchanged proxy background -> 100% transparent
+                if (max_diff <= 2) {
                     dst_row[x] = 0x00000000;
                     continue;
                 }
 
-                if (kg >= 16) {
-                    int dg_r = g - r;
-                    int dg_b = g - b;
-                    int db_r = b - r;
-                    if (dg_r > 1 && db_r >= -4 && dg_b >= -4 && std::abs(dg_b - db_r) <= 10 && g <= (kg + 16)) {
-                        int bg_frac_256 = std::min(256, std::max(0, (dg_r * 256) / k_dg_r));
-                        int alpha = 255 - ((bg_frac_256 * 255) >> 8);
-                        if (alpha <= 10) {
-                            dst_row[x] = 0x00000000;
-                        } else {
-                            int r_clean = std::min(alpha, std::max(0, r - ((kr * bg_frac_256) >> 8)));
-                            int g_clean = std::min(alpha, std::max(0, g - ((kg * bg_frac_256) >> 8)));
-                            int b_clean = std::min(alpha, std::max(0, b - ((kb * bg_frac_256) >> 8)));
-                            dst_row[x] = (static_cast<uint32_t>(alpha) << 24) |
-                                         (static_cast<uint32_t>(r_clean) << 16) |
-                                         (static_cast<uint32_t>(g_clean) << 8) |
-                                         static_cast<uint32_t>(b_clean);
-                        }
-                        continue;
+                // 2. Darkened below neutral baseline -> translucent dark OSD panel, shadow, or full-screen vignette dimming
+                if (dr <= 2 && dg <= 2 && db <= 2 && std::abs(r - g) <= 8 && std::abs(g - b) <= 8) {
+                    int luma = (r + g + b) / 3;
+                    int bg_frac_256 = std::min(256, std::max(0, (luma * 256) / k_luma));
+                    int alpha = 255 - ((bg_frac_256 * 255) >> 8);
+                    if (alpha <= 4) {
+                        dst_row[x] = 0x00000000;
+                    } else {
+                        dst_row[x] = static_cast<uint32_t>(alpha) << 24;
                     }
+                    continue;
                 }
 
+                // 3. Anti-aliased edge / semi-transparent highlight blending over the neutral baseline ->
+                //    proportional alpha with the (1 - alpha) * B gray background subtracted out!
+                if (max_diff < 96) {
+                    int alpha = std::min(255, std::max(16, (max_diff * 255) / 96));
+                    int inv_a = 256 - alpha;
+                    int r_pre = std::min(alpha, std::max(0, r - ((kr * inv_a) >> 8)));
+                    int g_pre = std::min(alpha, std::max(0, g - ((kg * inv_a) >> 8)));
+                    int b_pre = std::min(alpha, std::max(0, b - ((kb * inv_a) >> 8)));
+                    dst_row[x] = (static_cast<uint32_t>(alpha) << 24) |
+                                 (static_cast<uint32_t>(r_pre) << 16) |
+                                 (static_cast<uint32_t>(g_pre) << 8) |
+                                 static_cast<uint32_t>(b_pre);
+                    continue;
+                }
+
+                // 4. Opaque bright or colored skin element (including green, blue, red, white) -> 100% opaque
                 dst_row[x] = 0xFF000000 | (c & 0x00FFFFFF);
             }
         }
 
         ctx->d3d_context->Unmap(ctx->d3d_staging_tex.Get(), 0);
 
-        ComPtr<ID3D11Texture2D> dcomp_backbuf;
-        if (SUCCEEDED(ctx->dcomp_swapchain->GetBuffer(0, IID_PPV_ARGS(&dcomp_backbuf))) && dcomp_backbuf) {
-            ctx->d3d_context->UpdateSubresource(
-                dcomp_backbuf.Get(), 0, nullptr, ctx->osd_pixels, static_cast<UINT>(kw * 4), 0);
-            ctx->dcomp_present_ok = SUCCEEDED(ctx->dcomp_swapchain->Present(0, 0));
-        }
+        RECT kodi_rect = {};
+        GetWindowRect(ctx->kodi_hwnd, &kodi_rect);
+        POINT pt_dst = {kodi_rect.left, kodi_rect.top};
+        SIZE sz_win = {kw, kh};
+        POINT pt_src = {0, 0};
+        BLENDFUNCTION blend = {};
+        blend.BlendOp = AC_SRC_OVER;
+        blend.BlendFlags = 0;
+        blend.SourceConstantAlpha = 255;
+        blend.AlphaFormat = AC_SRC_ALPHA;
+
+        HDC screen_dc = GetDC(nullptr);
+        ctx->last_ulw_ok = (UpdateLayeredWindow(
+            ctx->osd_hwnd,
+            screen_dc,
+            &pt_dst,
+            &sz_win,
+            ctx->osd_mem_dc,
+            &pt_src,
+            0,
+            &blend,
+            ULW_ALPHA) != FALSE);
+        ReleaseDC(nullptr, screen_dc);
     } catch (...) {}
 }
 
@@ -907,6 +942,14 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                 ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
+        case WM_APP + 8:
+            if (ctx && ctx->webview) {
+                int rate_pct = static_cast<int>(wparam);
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('set_rate', " +
+                                  std::to_wstring(rate_pct) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
+            }
+            return 0;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE || wparam == VK_BROWSER_BACK || wparam == VK_MEDIA_STOP) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -1080,7 +1123,7 @@ bool RunInteractiveWebView2Window(
         RegisterClassExW(&osd_wc);
 
         ctx.osd_hwnd = CreateWindowExW(
-            WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             kOsdClassName,
             L"StreamBridge OSD Overlay",
             WS_POPUP,
@@ -1868,7 +1911,7 @@ bool ProbeNetflixCadmiumContractToJson(
     return true;
 }
 
-bool RunDCompVisualOverlayTest(
+bool RunWgcBaselineDiffTest(
     const std::string& output_json_path,
     std::string* out_error) {
     HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -1876,7 +1919,7 @@ bool RunDCompVisualOverlayTest(
     RoInitialize(RO_INIT_SINGLETHREADED);
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);
-    const wchar_t* kMockKodiClass = L"StreamBridgeMockKodiDCompClass";
+    const wchar_t* kMockKodiClass = L"StreamBridgeMockKodiDiffClass";
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = DefWindowProcW;
@@ -1887,7 +1930,7 @@ bool RunDCompVisualOverlayTest(
     const int kW = 640;
     const int kH = 360;
     HWND mock_kodi = CreateWindowExW(
-        0, kMockKodiClass, L"MockKodiDComp", WS_POPUP | WS_VISIBLE,
+        0, kMockKodiClass, L"MockKodiDiffSwapChain", WS_POPUP | WS_VISIBLE,
         80, 80, kW, kH, nullptr, nullptr, hinst, nullptr);
     if (!mock_kodi) {
         if (uninit_com) CoUninitialize();
@@ -1924,19 +1967,26 @@ bool RunDCompVisualOverlayTest(
         factory->CreateSwapChainForHwnd(dev.Get(), mock_kodi, &sc_desc, nullptr, nullptr, &swapchain);
     }
 
-    std::vector<uint32_t> frame_buf(kW * kH, 0xFF207048u);
+    // Neutral gray background RGB(48, 48, 48) -> 0xFF303030
+    // Translucent dark OSD bar (y = 240..320): 50% black over RGB(48, 48, 48) -> RGB(24, 24, 24) (0xFF181818)
+    // Bright green skin badge (x = 180..240, y = 260..300): RGB(32, 200, 72) (0xFF20C848)
+    // Opaque white OSD text (x = 280..360, y = 260..300): RGB(255, 255, 255) (0xFFFFFFFF)
+    std::vector<uint32_t> frame_buf(kW * kH, 0xFF303030u);
     for (int y = 240; y < 320; ++y) {
         for (int x = 0; x < kW; ++x) {
-            frame_buf[y * kW + x] = 0xFF103824u;
+            frame_buf[y * kW + x] = 0xFF181818u;
         }
     }
     for (int y = 260; y < 300; ++y) {
+        for (int x = 180; x < 240; ++x) {
+            frame_buf[y * kW + x] = 0xFF20C848u;
+        }
         for (int x = 280; x < 360; ++x) {
             frame_buf[y * kW + x] = 0xFFFFFFFFu;
         }
     }
 
-    const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayDCompTestClass";
+    const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayDiffTestClass";
     WNDCLASSEXW osd_wc = {};
     osd_wc.cbSize = sizeof(WNDCLASSEXW);
     osd_wc.lpfnWndProc = DefWindowProcW;
@@ -1948,8 +1998,8 @@ bool RunDCompVisualOverlayTest(
     ctx.kodi_hwnd = mock_kodi;
     ctx.osd_mode = 1;
     ctx.osd_hwnd = CreateWindowExW(
-        WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        kOsdClassName, L"StreamBridge OSD Overlay DComp Test", WS_POPUP | WS_VISIBLE,
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        kOsdClassName, L"StreamBridge OSD Overlay Diff Test", WS_POPUP | WS_VISIBLE,
         80, 80, kW, kH, nullptr, nullptr, hinst, nullptr);
 
     EnsureWgcKodiCapture(&ctx);
@@ -1967,43 +2017,41 @@ bool RunDCompVisualOverlayTest(
         }
         Sleep(25);
         UpdateOsdLayeredWindowWgc(&ctx);
-        if (ctx.wgc_frames_captured >= 2 && ctx.dcomp_present_ok && ctx.osd_pixels) {
+        if (ctx.wgc_frames_captured >= 2 && ctx.last_ulw_ok && ctx.osd_pixels) {
             break;
         }
     }
 
     int bg_alpha = -1;
     int panel_alpha = -1;
+    int green_badge_alpha = -1;
     int text_alpha = -1;
-    int text_r = -1;
     if (ctx.osd_pixels && ctx.osd_width == kW && ctx.osd_height == kH) {
-        uint32_t px_bg = ctx.osd_pixels[100 * kW + 100];
-        uint32_t px_panel = ctx.osd_pixels[280 * kW + 100];
-        uint32_t px_text = ctx.osd_pixels[280 * kW + 320];
-        bg_alpha = static_cast<int>((px_bg >> 24) & 0xFF);
-        panel_alpha = static_cast<int>((px_panel >> 24) & 0xFF);
-        text_alpha = static_cast<int>((px_text >> 24) & 0xFF);
-        text_r = static_cast<int>((px_text >> 16) & 0xFF);
+        bg_alpha = static_cast<int>((ctx.osd_pixels[100 * kW + 100] >> 24) & 0xFF);
+        panel_alpha = static_cast<int>((ctx.osd_pixels[280 * kW + 100] >> 24) & 0xFF);
+        green_badge_alpha = static_cast<int>((ctx.osd_pixels[280 * kW + 200] >> 24) & 0xFF);
+        text_alpha = static_cast<int>((ctx.osd_pixels[280 * kW + 320] >> 24) & 0xFF);
     }
 
     bool pass = (ctx.wgc_initialized &&
                  ctx.wgc_frames_captured > 0 &&
-                 ctx.dcomp_present_ok &&
+                 ctx.last_ulw_ok &&
                  bg_alpha == 0 &&
                  panel_alpha >= 90 && panel_alpha <= 170 &&
-                 text_alpha == 255 && text_r == 255);
+                 green_badge_alpha == 255 &&
+                 text_alpha == 255);
 
     std::ofstream ofs(output_json_path, std::ios::binary | std::ios::trunc);
     if (ofs.is_open()) {
         ofs << "{\n"
-            << "  \"branch\": \"osd/path3-dcomp-child-surface\",\n"
+            << "  \"branch\": \"osd/path4-wgc-baseline-diff\",\n"
             << "  \"wgc_initialized\": " << (ctx.wgc_initialized ? "true" : "false") << ",\n"
             << "  \"wgc_frames_captured\": " << ctx.wgc_frames_captured << ",\n"
-            << "  \"dcomp_present_ok\": " << (ctx.dcomp_present_ok ? "true" : "false") << ",\n"
+            << "  \"ulw_ok\": " << (ctx.last_ulw_ok ? "true" : "false") << ",\n"
             << "  \"bg_alpha\": " << bg_alpha << ",\n"
             << "  \"panel_alpha\": " << panel_alpha << ",\n"
+            << "  \"green_badge_alpha\": " << green_badge_alpha << ",\n"
             << "  \"text_alpha\": " << text_alpha << ",\n"
-            << "  \"text_r\": " << text_r << ",\n"
             << "  \"pass\": " << (pass ? "true" : "false") << "\n"
             << "}\n";
         ofs.close();
@@ -2013,7 +2061,7 @@ bool RunDCompVisualOverlayTest(
     DestroyWindow(mock_kodi);
     if (uninit_com) CoUninitialize();
     if (!pass && out_error) {
-        *out_error = "DirectComposition DXGI_ALPHA_MODE_PREMULTIPLIED overlay test failed";
+        *out_error = "WGC neutral baseline subtraction test failed";
     }
     return pass;
 }

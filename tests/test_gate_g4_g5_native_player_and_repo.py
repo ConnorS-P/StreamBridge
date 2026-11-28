@@ -441,10 +441,10 @@ def test_cadmium_webview2_win32_controls_and_postplay_regression(tmp_path: Path)
 
 
 @pytest.mark.skipif(sys.platform != "win32" or not PLAYER_EXE.exists(), reason="Windows StreamBridge.Player.exe required")
-def test_dcomp_visual_overlay_self_test(tmp_path: Path) -> None:
-    out_json = tmp_path / "dcomp_report.json"
+def test_wgc_baseline_diff_self_test(tmp_path: Path) -> None:
+    out_json = tmp_path / "wgc_diff_report.json"
     proc = subprocess.run(
-        [str(PLAYER_EXE), "--test-dcomp", str(out_json)],
+        [str(PLAYER_EXE), "--test-wgc-diff", str(out_json)],
         capture_output=True,
         text=True,
         check=True,
@@ -453,8 +453,8 @@ def test_dcomp_visual_overlay_self_test(tmp_path: Path) -> None:
     assert proc.returncode == 0
     report = json.loads(out_json.read_text(encoding="utf-8"))
     assert report["pass"] is True
-    assert report["dcomp_present_ok"] is True
     assert report["bg_alpha"] == 0
     assert 90 <= int(report["panel_alpha"]) <= 170
+    assert report["green_badge_alpha"] == 255
     assert report["text_alpha"] == 255
 

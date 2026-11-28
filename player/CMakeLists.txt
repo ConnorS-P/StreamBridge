@@ -48,7 +48,6 @@ target_link_libraries(StreamBridge.Player PRIVATE
     avrt
     d3d11
     dxgi
-    dcomp
     windowsapp
     mfplat
     mfuuid

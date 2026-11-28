@@ -201,6 +201,16 @@ class KodiBridge:
             if dur_sec and dur_sec > 0:
                 info_tag.setDuration(int(dur_sec))
                 meta["duration"] = int(dur_sec)
+            if hasattr(xbmc, "VideoStreamDetail") and hasattr(info_tag, "addVideoStream"):
+                try:
+                    info_tag.addVideoStream(xbmc.VideoStreamDetail(1920, 1080, 1.7778, int(dur_sec or 0), "h264", ""))
+                except Exception as exc:
+                    self.log(f"addVideoStream skipped: {exc}", level="debug")
+            if hasattr(xbmc, "AudioStreamDetail") and hasattr(info_tag, "addAudioStream"):
+                try:
+                    info_tag.addAudioStream(xbmc.AudioStreamDetail(6, "eac3", "eng"))
+                except Exception as exc:
+                    self.log(f"addAudioStream skipped: {exc}", level="debug")
             if playback_state:
                 if hasattr(info_tag, "setPlaycount"):
                     info_tag.setPlaycount(int(playback_state.play_count))

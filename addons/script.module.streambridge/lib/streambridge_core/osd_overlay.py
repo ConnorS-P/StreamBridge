@@ -21,15 +21,15 @@ import struct
 import sys
 from typing import Any
 
-CHROMA_KEY_RGB: tuple[int, int, int] = (32, 112, 72)
+CHROMA_KEY_RGB: tuple[int, int, int] = (48, 48, 48)
 
 
 def generate_chroma_key_avi(
     output_path: Path,
     duration_seconds: int = 120,
-    fps: int = 10,
-    width: int = 2,
-    height: int = 2,
+    fps: int = 24,
+    width: int = 16,
+    height: int = 9,
     rgb: tuple[int, int, int] = CHROMA_KEY_RGB,
 ) -> Path:
     """Write a minimal, valid uncompressed 24-bit BI_RGB RIFF AVI file with 0 audio tracks."""
@@ -111,13 +111,16 @@ def generate_chroma_key_avi(
     movi_body = b"movi" + movi_frames
     movi_list = b"LIST" + struct.pack("<I", len(movi_body)) + movi_body
 
-    idx_entries = bytearray()
-    offset = 4  # relative to 'movi'
     chunk_total_len = 8 + frame_size
-    for _ in range(total_frames):
-        idx_entries += struct.pack("<4sIII", b"00db", 0x10, offset, frame_size)
-        offset += chunk_total_len
-    idx1_chunk = b"idx1" + struct.pack("<I", len(idx_entries)) + bytes(idx_entries)
+    expected_riff_len = 4 + len(hdrl_list) + len(movi_list) + 8 + (16 * total_frames)
+    if output_path.exists() and output_path.stat().st_size == (8 + expected_riff_len):
+        return output_path
+
+    idx_entries = b"".join(
+        struct.pack("<4sIII", b"00db", 0x10, 4 + i * chunk_total_len, frame_size)
+        for i in range(total_frames)
+    )
+    idx1_chunk = b"idx1" + struct.pack("<I", len(idx_entries)) + idx_entries
 
     riff_body = b"AVI " + hdrl_list + movi_list + idx1_chunk
     riff_file = b"RIFF" + struct.pack("<I", len(riff_body)) + riff_body
@@ -198,6 +201,8 @@ def send_player_control(action: str, value_seconds: int = 0) -> bool:
         return bool(post_msg(hwnd, WM_APP + 6, max(0, int(value_seconds)), 0))
     if act == "set_audio":
         return bool(post_msg(hwnd, WM_APP + 7, max(0, int(value_seconds)), 0))
+    if act == "set_rate":
+        return bool(post_msg(hwnd, WM_APP + 8, max(25, min(400, int(value_seconds))), 0))
     if act in ("stop", "ended", "close"):
         return bool(post_msg(hwnd, WM_CLOSE, 0, 0))
     return False

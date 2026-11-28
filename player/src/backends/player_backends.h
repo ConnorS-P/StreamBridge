@@ -30,7 +30,7 @@ bool ProbeNetflixCadmiumContractToJson(
     const std::string& output_json_path,
     std::string* out_error);
 
-bool RunDCompVisualOverlayTest(
+bool RunWgcBaselineDiffTest(
     const std::string& output_json_path,
     std::string* out_error);
 

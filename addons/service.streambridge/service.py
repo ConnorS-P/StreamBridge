@@ -80,7 +80,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
     def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
         now = time.time()
         target_sec = float(time_ms) / 1000.0
-        if (now - self.last_programmatic_seek_ts) < 6.0 or abs(target_sec - self.last_programmatic_seek_target) < 8.0:
+        if (now - self.last_programmatic_seek_ts) < 1.2 and abs(target_sec - self.last_programmatic_seek_target) < 1.5:
             return
         self.last_action = "seek"
         self.last_user_seek_ts = now
@@ -118,9 +118,30 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
             return
 
         if seek_offset != 0:
-            send_player_control("seek_by", int(round(float(seek_offset) / 1000.0)))
+            delta_sec = int(round(float(seek_offset) / 1000.0))
+            if delta_sec == -1:
+                delta_sec = -10
+            elif delta_sec == 1:
+                delta_sec = 10
+            self.last_known_netflix_pos = max(0.0, self.last_known_netflix_pos + float(delta_sec))
+            send_player_control("seek_by", delta_sec)
         else:
+            self.last_known_netflix_pos = target_sec
             send_player_control("seek", int(target_sec))
+
+    def onPlayBackSpeedChanged(self, speed: int) -> None:
+        self.last_action = "speed"
+        if speed == 1:
+            send_player_control("set_rate", 100)
+        elif speed > 1:
+            send_player_control("set_rate", min(400, int(speed * 100)))
+        elif speed < 0:
+            send_player_control("seek_by", -10)
+            if IN_KODI and xbmc is not None:
+                try:
+                    xbmc.executebuiltin("PlayerControl(Play)")
+                except Exception as exc:
+                    self.kodi.log(f"Rewind play reset skipped: {exc}", level="debug")
 
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
@@ -198,6 +219,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self._last_telemetry_poll: float = 0.0
         self._last_bookmark_sync_ts: float = 0.0
         self._last_osd_mode: int = -1
+        self._last_rate_pct: int = 100
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
 
     def _execute_sync(
@@ -431,6 +453,17 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if mode != self._last_osd_mode:
             self._last_osd_mode = mode
             send_player_control("osd_mode", mode)
+
+        try:
+            spd_str = (xbmc.getInfoLabel("Player.PlaySpeed") or "1.00").strip()
+            spd_val = float(spd_str)
+            if 0.25 <= spd_val <= 4.0:
+                rate_pct = int(round(spd_val * 100.0))
+                if rate_pct != self._last_rate_pct:
+                    self._last_rate_pct = rate_pct
+                    send_player_control("set_rate", rate_pct)
+        except Exception as exc:
+            self.kodi.log(f"PlaySpeed sync skipped: {exc}", level="debug")
 
     def _open_cadmium_track_picker(self, track_key: str, control_action: str, heading: str) -> None:
         """Present a native Kodi `Dialog().select(...)` listing live Netflix Cadmium subtitle or audio tracks."""
