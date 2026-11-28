@@ -32,6 +32,7 @@ from .osd_overlay import (
     disable_kodi_osd_cutout,
     enable_kodi_osd_cutout,
     generate_chroma_key_avi,
+    read_proxy_server_port,
 )
 from .platform_compat import (
     PlatformEnvironment,
@@ -131,11 +132,15 @@ class PlaybackBroker:
             if env.has_native_companion_exe and env.companion_exe_path is not None:
                 import subprocess
 
-                proxy_path = self.kodi.get_profile_dir() / "osd_proxy_key.avi"
-                content_dur = int(descriptor.duration_seconds) if (descriptor.duration_seconds and descriptor.duration_seconds > 60) else 7200
-                target_dur = (content_dur + 30) if not wait_for_exit else 120
-                proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=target_dur)
-                self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
+                proxy_port = read_proxy_server_port()
+                if proxy_port > 0 and not wait_for_exit:
+                    self.kodi.window_properties["streambridge.osd_proxy_path"] = (
+                        f"http://127.0.0.1:{proxy_port}/proxy/{descriptor.title_id}.avi"
+                    )
+                else:
+                    proxy_path = self.kodi.get_profile_dir() / "osd_proxy_key.avi"
+                    proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=120)
+                    self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
                 enable_kodi_osd_cutout()
                 no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0
                 cmd = [str(env.companion_exe_path), "--watch", descriptor.launch_url]

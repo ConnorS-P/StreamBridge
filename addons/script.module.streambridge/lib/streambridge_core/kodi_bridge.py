@@ -599,3 +599,111 @@ class KodiBridge:
             }
         except Exception:
             return defaults
+
+    def persist_kodi_streamdetails_for_title(
+        self,
+        title: Title,
+        video_width: int = 1920,
+        video_height: int = 1080,
+        duration_seconds: int = 0,
+        audio_tracks: list[dict[str, Any]] | None = None,
+        subtitles: list[dict[str, Any]] | None = None,
+        db_dir_override: Path | None = None,
+    ) -> int:
+        """Write observed stream details (resolution, codec, audio channels/langs, subtitle langs)
+        into Kodi's `MyVideos*.db` `streamdetails` table so library views display disc-like media flags.
+        """
+        import sqlite3
+
+        db_dir = db_dir_override
+        if db_dir is None:
+            if IN_KODI and xbmcvfs is not None:
+                db_dir = Path(xbmcvfs.translatePath("special://userdata/Database"))
+            else:
+                return 0
+        if not db_dir.exists():
+            return 0
+
+        candidates = sorted(db_dir.glob("MyVideos*.db"), reverse=True)
+        if not candidates:
+            return 0
+
+        from .projection import sanitize_filename
+
+        safe_title = sanitize_filename(title.title)
+        expected_strm_names: list[str] = []
+        if title.media_type == MediaType.MOVIE:
+            folder_name = f"{safe_title} ({title.year})" if title.year else safe_title
+            expected_strm_names.append(f"{folder_name}.strm")
+        else:
+            s_num = title.season if title.season is not None else 1
+            e_num = title.episode if title.episode is not None else 1
+            ep_str = f"S{s_num:02d}E{e_num:02d}"
+            expected_strm_names.append(f"{ep_str} - {safe_title}.strm")
+            expected_strm_names.append(f"{ep_str}.strm")
+
+        v_codec = "hevc" if video_width >= 3840 else "h264"
+        aspect = round(float(video_width) / float(max(1, video_height)), 4)
+        dur = max(0, int(duration_seconds or title.runtime_seconds or 0))
+        aud_list = audio_tracks if audio_tracks else [{"lang": "eng", "channels": 6}]
+        sub_list = [s for s in (subtitles or []) if isinstance(s, dict) and s.get("lang")]
+
+        updated_files = 0
+        for db_path in candidates[:1]:
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=3.0)
+                try:
+                    cur = conn.cursor()
+                    file_ids: set[int] = set()
+                    for strm_name in expected_strm_names:
+                        cur.execute(
+                            "SELECT idFile FROM files WHERE strFilename = ? OR strFilename LIKE ?",
+                            (strm_name, f"%{strm_name}"),
+                        )
+                        for row in cur.fetchall():
+                            if row and row[0] is not None:
+                                file_ids.add(int(row[0]))
+
+                    if not file_ids:
+                        continue
+
+                    for fid in file_ids:
+                        cur.execute("DELETE FROM streamdetails WHERE idFile = ?", (fid,))
+                        cur.execute(
+                            "INSERT INTO streamdetails (idFile, iStreamType, strVideoCodec, fVideoAspect, iVideoWidth, iVideoHeight, iVideoDuration) "
+                            "VALUES (?, 0, ?, ?, ?, ?, ?)",
+                            (fid, v_codec, aspect, int(video_width), int(video_height), dur),
+                        )
+                        seen_aud: set[tuple[str, int]] = set()
+                        for trk in aud_list:
+                            if not isinstance(trk, dict):
+                                continue
+                            lang = str(trk.get("lang") or "eng")[:12]
+                            ch = int(str(trk.get("channels") or 6))
+                            if (lang, ch) in seen_aud:
+                                continue
+                            seen_aud.add((lang, ch))
+                            cur.execute(
+                                "INSERT INTO streamdetails (idFile, iStreamType, strAudioCodec, iAudioChannels, strAudioLanguage) "
+                                "VALUES (?, 1, ?, ?, ?)",
+                                (fid, "eac3", ch, lang),
+                            )
+                        seen_sub: set[str] = set()
+                        for sub in sub_list:
+                            lang = str(sub.get("lang") or "")[:12]
+                            if not lang or lang in seen_sub:
+                                continue
+                            seen_sub.add(lang)
+                            cur.execute(
+                                "INSERT INTO streamdetails (idFile, iStreamType, strSubtitleLanguage) "
+                                "VALUES (?, 2, ?)",
+                                (fid, lang),
+                            )
+                        updated_files += 1
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as exc:
+                self.log(f"streamdetails update skipped: {exc}", level="debug")
+        return updated_files
+

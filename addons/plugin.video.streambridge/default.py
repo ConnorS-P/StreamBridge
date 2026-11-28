@@ -549,7 +549,14 @@ def play_route(title_id: str) -> PlaybackSessionResult:
         import xbmcgui  # type: ignore[import-not-found]
         import xbmcplugin  # type: ignore[import-not-found]
 
-        proxy_path = app.kodi.get_profile_dir() / "osd_proxy_key.avi"
+        from streambridge_core.osd_overlay import read_proxy_server_port
+
+        proxy_port = read_proxy_server_port()
+        proxy_path = (
+            f"http://127.0.0.1:{proxy_port}/proxy/{title_id}.avi"
+            if proxy_port > 0
+            else str(app.kodi.get_profile_dir() / "osd_proxy_key.avi")
+        )
         title_obj = app.store.get_title(title_id)
         if title_obj is not None:
             offers = app.store.get_offers_for_title(title_id, provider="netflix")
@@ -558,10 +565,10 @@ def play_route(title_id: str) -> PlaybackSessionResult:
                 offer=offers[0] if offers else None,
                 playback_state=pb_state,
             )
-            li = meta.get("listitem") or xbmcgui.ListItem(path=str(proxy_path))
-            li.setPath(str(proxy_path))
+            li = meta.get("listitem") or xbmcgui.ListItem(path=proxy_path)
+            li.setPath(proxy_path)
         else:
-            li = xbmcgui.ListItem(path=str(proxy_path))
+            li = xbmcgui.ListItem(path=proxy_path)
         xbmcplugin.setResolvedUrl(plugin.handle, True, li)
     return result
 

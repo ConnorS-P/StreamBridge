@@ -20,6 +20,7 @@ from streambridge_core.kodi_bridge import IN_KODI, KodiBridge
 from streambridge_core.kodi_rpc import KodiJsonRpcClient
 from streambridge_core.models import PlaybackSessionState, PlaybackState, Title
 from streambridge_core.osd_overlay import (
+    OsdProxyHttpServer,
     disable_kodi_osd_cutout,
     read_live_telemetry,
     send_player_control,
@@ -61,9 +62,11 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_known_netflix_pos: float = 0.0
         self.last_known_netflix_dur: float = 0.0
         self.saw_fullscreen_video: bool = False
+        self.in_trickplay_scrub: bool = False
 
     def onPlayBackStarted(self) -> None:
         self.saw_fullscreen_video = False
+        self.in_trickplay_scrub = False
 
     def onPlayBackPaused(self) -> None:
         self.last_action = "pause"
@@ -75,6 +78,17 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
     def onPlayBackResumed(self) -> None:
         self.last_action = "resume"
         self.holding_for_buffer = False
+        if self.in_trickplay_scrub:
+            self.in_trickplay_scrub = False
+            if IN_KODI and xbmc is not None:
+                try:
+                    target_sec = max(0.0, float(xbmc.Player().getTime()))
+                    self.last_known_netflix_pos = target_sec
+                    self.last_user_seek_ts = time.time()
+                    send_player_control("seek", int(round(target_sec)))
+                except Exception as exc:
+                    self.kodi.log(f"Trickplay resume seek skipped: {exc}", level="debug")
+        send_player_control("set_rate", 100)
         send_player_control("resume")
 
     def onPlayBackSeek(self, time_ms: int, seek_offset: int) -> None:
@@ -86,43 +100,26 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_user_seek_ts = now
         self.last_seek_seconds = target_sec
 
-        # Intercept chapterless '>>' (SkipNext to end) and '<<' (SkipPrevious to 0:00) on Kodi's M OSD bar
+        # Chapterless '>>' (SkipNext to end): jump +180s (3 minutes) instead of closing playback
         if (
             self.last_known_netflix_dur > 60.0
             and target_sec >= (self.last_known_netflix_dur - 15.0)
             and seek_offset > 120000
         ):
-            new_pos = min(self.last_known_netflix_dur - 5.0, self.last_known_netflix_pos + 30.0)
+            new_pos = min(self.last_known_netflix_dur - 5.0, self.last_known_netflix_pos + 180.0)
             self.last_known_netflix_pos = new_pos
-            send_player_control("seek_by", 30)
+            send_player_control("seek", int(round(new_pos)))
             if IN_KODI and xbmc is not None:
                 try:
                     self.last_programmatic_seek_ts = time.time()
                     self.last_programmatic_seek_target = new_pos
                     xbmc.Player().seekTime(new_pos)
                 except Exception as exc:
-                    self.kodi.log(f"SkipNext clamp seekTime skipped: {exc}", level="debug")
-            return
-
-        if target_sec <= 2.0 and seek_offset < -60000 and self.last_known_netflix_pos > 15.0:
-            new_pos = max(0.0, self.last_known_netflix_pos - 30.0)
-            self.last_known_netflix_pos = new_pos
-            send_player_control("seek_by", -30)
-            if IN_KODI and xbmc is not None:
-                try:
-                    self.last_programmatic_seek_ts = time.time()
-                    self.last_programmatic_seek_target = new_pos
-                    xbmc.Player().seekTime(new_pos)
-                except Exception as exc:
-                    self.kodi.log(f"SkipPrev clamp seekTime skipped: {exc}", level="debug")
+                    self.kodi.log(f"SkipNext seekTime skipped: {exc}", level="debug")
             return
 
         if seek_offset != 0:
             delta_sec = int(round(float(seek_offset) / 1000.0))
-            if delta_sec == -1:
-                delta_sec = -10
-            elif delta_sec == 1:
-                delta_sec = 10
             self.last_known_netflix_pos = max(0.0, self.last_known_netflix_pos + float(delta_sec))
             send_player_control("seek_by", delta_sec)
         else:
@@ -132,21 +129,28 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
     def onPlayBackSpeedChanged(self, speed: int) -> None:
         self.last_action = "speed"
         if speed == 1:
+            if self.in_trickplay_scrub:
+                self.in_trickplay_scrub = False
+                if IN_KODI and xbmc is not None:
+                    try:
+                        target_sec = max(0.0, float(xbmc.Player().getTime()))
+                        self.last_known_netflix_pos = target_sec
+                        self.last_user_seek_ts = time.time()
+                        send_player_control("seek", int(round(target_sec)))
+                    except Exception as exc:
+                        self.kodi.log(f"Trickplay commit seek skipped: {exc}", level="debug")
+                send_player_control("resume")
             send_player_control("set_rate", 100)
-        elif speed > 1:
-            send_player_control("set_rate", min(400, int(speed * 100)))
-        elif speed < 0:
-            send_player_control("seek_by", -10)
-            if IN_KODI and xbmc is not None:
-                try:
-                    xbmc.executebuiltin("PlayerControl(Play)")
-                except Exception as exc:
-                    self.kodi.log(f"Rewind play reset skipped: {exc}", level="debug")
+        elif speed > 1 or speed < 0:
+            self.in_trickplay_scrub = True
+            self.last_user_seek_ts = time.time()
+            send_player_control("pause")
 
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
         self.holding_for_buffer = False
         self.saw_fullscreen_video = False
+        self.in_trickplay_scrub = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
@@ -155,6 +159,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_action = "ended"
         self.holding_for_buffer = False
         self.saw_fullscreen_video = False
+        self.in_trickplay_scrub = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
@@ -220,7 +225,23 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         self._last_bookmark_sync_ts: float = 0.0
         self._last_osd_mode: int = -1
         self._last_rate_pct: int = 100
+        self._persisted_streamdetails_titles: set[str] = set()
         self.player_monitor = StreamBridgePlayerMonitor(self.kodi)
+        self.proxy_http_server = OsdProxyHttpServer(
+            should_pace_callback=self._should_pace_proxy_stream,
+            default_duration_provider=self._get_title_default_duration,
+        )
+
+    def _should_pace_proxy_stream(self) -> bool:
+        if self.player_monitor.in_trickplay_scrub:
+            return False
+        return (time.time() - self.player_monitor.last_user_seek_ts) >= 3.5
+
+    def _get_title_default_duration(self, title_id: str) -> int:
+        t = self.store.get_title(title_id)
+        if t and t.runtime_seconds and t.runtime_seconds > 60:
+            return int(t.runtime_seconds)
+        return 7200
 
     def _execute_sync(
         self,
@@ -367,6 +388,7 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             try:
                 if (
                     raw_state == "playing"
+                    and not self.player_monitor.in_trickplay_scrub
                     and pos > 1.0
                     and (now - self.player_monitor.last_user_seek_ts) > 10.0
                     and (now - self.player_monitor.last_programmatic_seek_ts) > 10.0
@@ -406,6 +428,23 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             if dur > 60 and title.runtime_seconds != int(dur):
                 title.runtime_seconds = int(dur)
                 self.store.upsert_title(title)
+            vid_w = int(telemetry.get("video_width") or 1920)
+            vid_h = int(telemetry.get("video_height") or 1080)
+            aud_tracks = telemetry.get("audio_tracks")
+            sub_tracks = telemetry.get("subtitles")
+            if (
+                active_title_id not in self._persisted_streamdetails_titles
+                or state_enum == PlaybackSessionState.STOPPED
+            ) and isinstance(aud_tracks, list) and len(aud_tracks) > 0:
+                self._persisted_streamdetails_titles.add(active_title_id)
+                self.kodi.persist_kodi_streamdetails_for_title(
+                    title,
+                    video_width=vid_w,
+                    video_height=vid_h,
+                    duration_seconds=int(dur),
+                    audio_tracks=aud_tracks,
+                    subtitles=sub_tracks if isinstance(sub_tracks, list) else None,
+                )
             if (now - self._last_bookmark_sync_ts) >= 15.0 or state_enum == PlaybackSessionState.STOPPED:
                 self._last_bookmark_sync_ts = now
                 self._sync_title_bookmark_to_kodi(title, pb)
@@ -455,13 +494,14 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             send_player_control("osd_mode", mode)
 
         try:
-            spd_str = (xbmc.getInfoLabel("Player.PlaySpeed") or "1.00").strip()
-            spd_val = float(spd_str)
-            if 0.25 <= spd_val <= 4.0:
-                rate_pct = int(round(spd_val * 100.0))
-                if rate_pct != self._last_rate_pct:
-                    self._last_rate_pct = rate_pct
-                    send_player_control("set_rate", rate_pct)
+            if not self.player_monitor.in_trickplay_scrub:
+                spd_str = (xbmc.getInfoLabel("Player.PlaySpeed") or "1.00").strip()
+                spd_val = float(spd_str)
+                if 0.50 <= spd_val <= 1.50:
+                    rate_pct = int(round(spd_val * 100.0))
+                    if rate_pct != self._last_rate_pct:
+                        self._last_rate_pct = rate_pct
+                        send_player_control("set_rate", rate_pct)
         except Exception as exc:
             self.kodi.log(f"PlaySpeed sync skipped: {exc}", level="debug")
 
@@ -499,25 +539,32 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
             self.kodi.log(f"Track picker error ({track_key}): {exc}", level="warning")
 
     def run_forever(self) -> None:
+        try:
+            self.proxy_http_server.start()
+        except Exception as exc:
+            self.kodi.log(f"OSD proxy HTTP server start skipped: {exc}", level="warning")
         sched = self.kodi.load_sync_schedule_settings()
         if sched.get("sync_on_startup", True):
             self.run_startup_sync()
         else:
             self.last_sync_timestamp = time.time()
-        while not self.abortRequested():
-            playing = self.kodi.is_playing_video()
-            wait_sec = 0.15 if playing else 10.0
-            if self.waitForAbort(wait_sec):
-                break
-            if playing:
-                self.sync_osd_cutout_mode()
-                now = time.time()
-                if (now - self._last_telemetry_poll) >= 0.25:
-                    self._last_telemetry_poll = now
-                    self.poll_live_telemetry()
-            else:
-                self._last_osd_mode = -1
-                self.run_periodic_sync_if_due()
+        try:
+            while not self.abortRequested():
+                playing = self.kodi.is_playing_video()
+                wait_sec = 0.15 if playing else 10.0
+                if self.waitForAbort(wait_sec):
+                    break
+                if playing:
+                    self.sync_osd_cutout_mode()
+                    now = time.time()
+                    if (now - self._last_telemetry_poll) >= 0.25:
+                        self._last_telemetry_poll = now
+                        self.poll_live_telemetry()
+                else:
+                    self._last_osd_mode = -1
+                    self.run_periodic_sync_if_due()
+        finally:
+            self.proxy_http_server.stop()
 
 
 if __name__ == "__main__":

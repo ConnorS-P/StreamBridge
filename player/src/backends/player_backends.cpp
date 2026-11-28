@@ -196,7 +196,7 @@ const wchar_t* kNetflixCadmiumControlScript = LR"JS(
                 player.setAudioTrack(auds[value]);
             }
         } else if (action === 'set_rate' && typeof value === 'number') {
-            const rate = Math.max(0.25, Math.min(4.0, value / 100.0));
+            const rate = Math.max(0.50, Math.min(1.50, value / 100.0));
             if (v) v.playbackRate = rate;
         } else if (action === 'osd_mode') {
             window.__sbOsdVisible = Boolean(value > 0);
@@ -264,6 +264,28 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
         const isBusy = (player && typeof player.getBusy === 'function' && player.getBusy() !== null) || (v.readyState < 3);
         const isPaused = (player && typeof player.isPaused === 'function') ? player.isPaused() : v.paused;
 
+        let bufferedEndSec = posSec || 0.0;
+        try {
+            if (player && typeof player.getBufferedTime === 'function') {
+                const bt = player.getBufferedTime();
+                if (typeof bt === 'number' && bt > 0) {
+                    bufferedEndSec = Math.max(bufferedEndSec, (posSec || 0.0) + (bt / 1000.0));
+                }
+            }
+            if (v.buffered && v.buffered.length > 0) {
+                for (let i = 0; i < v.buffered.length; ++i) {
+                    const st = v.buffered.start(i);
+                    const en = v.buffered.end(i);
+                    if (st <= (posSec || 0.0) + 2.0 && en > bufferedEndSec) {
+                        bufferedEndSec = en;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        const vidW = (v.videoWidth && v.videoWidth >= 320) ? v.videoWidth : 1920;
+        const vidH = (v.videoHeight && v.videoHeight >= 240) ? v.videoHeight : 1080;
+
         const subtitles = [];
         const audioTracks = [];
         try {
@@ -274,7 +296,8 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
                     if (!t) return;
                     const lbl = t.isNoneTrack ? 'Off' : (t.displayName || t.bcp47 || ('Subtitle ' + (idx + 1)));
                     const isAct = Boolean(curSub && curSub.trackId === t.trackId);
-                    subtitles.push({ index: idx, label: String(lbl), active: isAct });
+                    const lang = t.isNoneTrack ? '' : String(t.bcp47 || t.language || 'eng');
+                    subtitles.push({ index: idx, label: String(lbl), lang: lang, active: isAct });
                 });
             }
             if (player && typeof player.getAudioTrackList === 'function') {
@@ -284,7 +307,11 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
                     if (!t) return;
                     const lbl = t.displayName || t.bcp47 || ('Audio ' + (idx + 1));
                     const isAct = Boolean(curAud && curAud.trackId === t.trackId);
-                    audioTracks.push({ index: idx, label: String(lbl), active: isAct });
+                    const lang = String(t.bcp47 || t.language || 'eng');
+                    const ch = (typeof t.channels === 'number' && t.channels > 0)
+                        ? t.channels
+                        : (String(lbl).indexOf('5.1') !== -1 ? 6 : 2);
+                    audioTracks.push({ index: idx, label: String(lbl), lang: lang, channels: ch, active: isAct });
                 });
             }
         } catch (e) {}
@@ -300,6 +327,9 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
             state: state,
             position_seconds: posSec || 0.0,
             duration_seconds: durSec || 0.0,
+            buffered_end_seconds: bufferedEndSec || 0.0,
+            video_width: vidW,
+            video_height: vidH,
             updated_at: Date.now() / 1000.0,
             osd_visible: Boolean(window.__sbOsdVisible),
             subtitles: subtitles,
