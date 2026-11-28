@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
     std::string test_fixture_path;
     std::string probe_cadmium_url;
     std::string probe_cadmium_out;
+    std::string test_dcomp_out;
     bool diagnose_only = false;
     bool self_test = false;
     bool dry_run = false;
@@ -110,6 +111,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--probe-cadmium" && i + 2 < argc) {
             probe_cadmium_url = argv[++i];
             probe_cadmium_out = argv[++i];
+        } else if ((arg == "--test-dcomp" || arg == "--test-wgc") && i + 1 < argc) {
+            test_dcomp_out = argv[++i];
         }
     }
 
@@ -138,6 +141,15 @@ int main(int argc, char* argv[]) {
         FreeConsole();
         std::string err;
         if (!streambridge::ProbeNetflixCadmiumContractToJson(probe_cadmium_url, probe_cadmium_out, &err)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    if (!test_dcomp_out.empty()) {
+        std::string err;
+        if (!streambridge::RunDCompVisualOverlayTest(test_dcomp_out, &err)) {
+            std::cerr << "DComp Test FAILED: " << err << "\n";
             return 1;
         }
         return 0;
