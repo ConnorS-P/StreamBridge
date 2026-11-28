@@ -60,6 +60,10 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
         self.last_user_pause_ts: float = 0.0
         self.last_known_netflix_pos: float = 0.0
         self.last_known_netflix_dur: float = 0.0
+        self.saw_fullscreen_video: bool = False
+
+    def onPlayBackStarted(self) -> None:
+        self.saw_fullscreen_video = False
 
     def onPlayBackPaused(self) -> None:
         self.last_action = "pause"
@@ -121,6 +125,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
     def onPlayBackStopped(self) -> None:
         self.last_action = "stop"
         self.holding_for_buffer = False
+        self.saw_fullscreen_video = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
@@ -128,6 +133,7 @@ class StreamBridgePlayerMonitor(_BasePlayer):  # type: ignore[valid-type,misc]
     def onPlayBackEnded(self) -> None:
         self.last_action = "ended"
         self.holding_for_buffer = False
+        self.saw_fullscreen_video = False
         send_player_control("stop")
         disable_kodi_osd_cutout()
         self.kodi.clear_ecosystem_window_properties()
@@ -387,6 +393,20 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         if not (IN_KODI and xbmc is not None):
             return
 
+        active_title_id = xbmc.getInfoLabel("Window(10000).Property(streambridge.title_id)") or ""
+        if active_title_id:
+            is_fs = bool(xbmc.getCondVisibility("Window.IsActive(fullscreenvideo)"))
+            if is_fs:
+                self.player_monitor.saw_fullscreen_video = True
+            elif self.player_monitor.saw_fullscreen_video:
+                self.player_monitor.saw_fullscreen_video = False
+                send_player_control("stop")
+                try:
+                    xbmc.Player().stop()
+                except Exception as exc:
+                    self.kodi.log(f"Fullscreen exit stop skipped: {exc}", level="debug")
+                return
+
         if xbmc.getCondVisibility("Window.IsVisible(osdsubtitlesettings)"):
             xbmc.executebuiltin("Dialog.Close(osdsubtitlesettings,true)")
             self._open_cadmium_track_picker(track_key="subtitles", control_action="set_subtitle", heading="StreamBridge — Select Subtitles")
@@ -400,7 +420,10 @@ class StreamBridgeServiceMonitor(_BaseMonitor):  # type: ignore[valid-type,misc]
         full_modal = bool(
             xbmc.getCondVisibility(
                 "Window.IsVisible(osdvideosettings) | Window.IsVisible(videobookmarks) | "
-                "Window.IsVisible(fullscreeninfo) | Window.IsVisible(selectdialog)"
+                "Window.IsVisible(fullscreeninfo) | Window.IsVisible(selectdialog) | "
+                "Window.IsVisible(subtitlesearch) | Window.IsVisible(sliderdialog) | "
+                "Window.IsVisible(playerprocessinfo) | Window.IsVisible(contextmenu) | "
+                "Window.IsVisible(yesnodialog) | Window.IsVisible(okdialog)"
             )
         )
         osd_bar = bool(xbmc.getCondVisibility("Window.IsVisible(videoosd) | Window.IsVisible(seekbar)"))

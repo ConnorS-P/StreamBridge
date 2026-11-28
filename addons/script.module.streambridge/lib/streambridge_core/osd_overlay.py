@@ -143,16 +143,7 @@ def enable_kodi_osd_cutout(
 
     user32 = ctypes.windll.user32
     hwnd = user32.FindWindowW("Kodi", None) or user32.FindWindowW(None, "Kodi")
-    if not hwnd:
-        return False
-
-    GWL_EXSTYLE = -20
-    WS_EX_LAYERED = 0x00080000
-    LWA_COLORKEY = 0x00000001
-    ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED)
-    colorref = (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16)
-    return bool(user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY))
+    return bool(hwnd)
 
 
 def disable_kodi_osd_cutout(overlay_dll_path: Path | None = None) -> bool:
@@ -171,13 +162,6 @@ def disable_kodi_osd_cutout(overlay_dll_path: Path | None = None) -> bool:
     hwnd = user32.FindWindowW("Kodi", None) or user32.FindWindowW(None, "Kodi")
     if not hwnd:
         return False
-
-    GWL_EXSTYLE = -20
-    WS_EX_LAYERED = 0x00080000
-    ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-    if ex_style & WS_EX_LAYERED:
-        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED)
-        user32.RedrawWindow(hwnd, None, None, 0x0001 | 0x0004 | 0x0400 | 0x0080)
     return True
 
 
