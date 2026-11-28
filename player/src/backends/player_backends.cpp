@@ -183,8 +183,243 @@ const wchar_t* kNetflixCadmiumControlScript = LR"JS(
             if (value >= 0 && value < auds.length && typeof player.setAudioTrack === 'function') {
                 player.setAudioTrack(auds[value]);
             }
+        } else if (action === 'osd_mode' && window.__sbSetOsdMode) {
+            window.__sbSetOsdMode(value);
         }
     };
+})();
+)JS";
+
+const wchar_t* kNetflixOsdCssScript = LR"JS(
+(function() {
+    window.__ensureOsdDom = function() {
+        if (document.getElementById('sb-kodi-osd') || !document.body) return;
+        const css = document.createElement('style');
+        css.textContent = [
+            '#sb-kodi-osd{position:fixed;left:0;right:0;bottom:0;z-index:2147483640;background:rgba(12,15,22,0.78);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.14);padding:22px 48px 28px;color:#f3f5f8;font-family:"Segoe UI",system-ui,sans-serif;transition:opacity .18s,transform .18s;opacity:0;transform:translateY(20px);pointer-events:none}',
+            '#sb-kodi-osd.sb-visible{opacity:1;transform:translateY(0);pointer-events:auto}',
+            '.sb-osd-row-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;font-size:20px;font-weight:600}',
+            '.sb-osd-time{font-size:16px;color:rgba(243,245,248,0.82);font-variant-numeric:tabular-nums}',
+            '.sb-osd-bar-bg{width:100%;height:8px;background:rgba(255,255,255,0.22);border-radius:4px;overflow:hidden;margin-bottom:18px}',
+            '#sb-osd-bar-fill{height:100%;width:0%;background:#e50914;border-radius:4px;transition:width .2s linear}',
+            '.sb-osd-btns{display:flex;gap:14px;align-items:center;flex-wrap:wrap}',
+            '.sb-osd-btn{background:rgba(255,255,255,0.10);color:#fff;border:2px solid transparent;border-radius:8px;padding:10px 20px;font-size:16px;font-weight:600;cursor:pointer;pointer-events:auto!important}',
+            '.sb-osd-btn.sb-focused{background:rgba(229,9,20,0.88);border-color:#fff;box-shadow:0 0 16px rgba(229,9,20,0.75);transform:scale(1.04)}',
+            '#sb-osd-modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147483645;min-width:440px;max-width:620px;max-height:70vh;background:rgba(14,18,26,0.86);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,0.18);border-radius:14px;padding:24px 28px;color:#fff;font-family:"Segoe UI",system-ui,sans-serif;display:none;flex-direction:column;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,0.75)}',
+            '#sb-osd-modal.sb-visible{display:flex}',
+            '.sb-modal-title{font-size:20px;font-weight:700;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:10px}',
+            '.sb-modal-item{padding:11px 16px;border-radius:8px;font-size:16px;background:rgba(255,255,255,0.06);border:2px solid transparent}',
+            '.sb-modal-item.sb-focused{background:rgba(229,9,20,0.88);border-color:#fff;font-weight:600}'
+        ].join('');
+        document.head.appendChild(css);
+
+        const osd = document.createElement('div');
+        osd.id = 'sb-kodi-osd';
+        osd.innerHTML = '<div class="sb-osd-row-top"><span id="sb-osd-title">Netflix Playback</span><span class="sb-osd-time" id="sb-osd-clock">0:00 / 0:00</span></div>' +
+            '<div class="sb-osd-bar-bg"><div id="sb-osd-bar-fill"></div></div>' +
+            '<div class="sb-osd-btns" id="sb-osd-btn-row">' +
+            '<button class="sb-osd-btn sb-focused" data-act="toggle_play" id="sb-btn-play">Pause</button>' +
+            '<button class="sb-osd-btn" data-act="back10">-10s</button>' +
+            '<button class="sb-osd-btn" data-act="fwd10">+10s</button>' +
+            '<button class="sb-osd-btn" data-act="fwd30">+30s</button>' +
+            '<button class="sb-osd-btn" data-act="subs" id="sb-btn-subs">Subtitles</button>' +
+            '<button class="sb-osd-btn" data-act="audio" id="sb-btn-audio">Audio</button>' +
+            '<button class="sb-osd-btn" data-act="restart">Start Over</button>' +
+            '<button class="sb-osd-btn" data-act="stop">Stop</button></div>';
+        document.body.appendChild(osd);
+
+        const modal = document.createElement('div');
+        modal.id = 'sb-osd-modal';
+        document.body.appendChild(modal);
+    };
+})();
+)JS";
+
+const wchar_t* kNetflixOsdUiScript = LR"JS(
+(function() {
+    if (window.__sbOsdUiInjected) return;
+    window.__sbOsdUiInjected = true;
+
+    function ensureOsdDom() {
+        if (window.__ensureOsdDom) window.__ensureOsdDom();
+    }
+
+    let osdVisible = false, hudAutoHideTimer = null, btnIdx = 0, modalMode = null, modalItems = [], modalIdx = 0;
+
+    function updateBtnFocus() {
+        const btns = Array.from(document.querySelectorAll('#sb-osd-btn-row .sb-osd-btn'));
+        btns.forEach((b, i) => b.classList.toggle('sb-focused', i === btnIdx));
+    }
+
+    function showOsd(interactiveMenu, autoHideMs) {
+        ensureOsdDom();
+        const osd = document.getElementById('sb-kodi-osd');
+        if (!osd) return;
+        osdVisible = true;
+        window.__sbOsdVisible = true;
+        osd.classList.add('sb-visible');
+        const btnRow = document.getElementById('sb-osd-btn-row');
+        if (btnRow) btnRow.style.display = interactiveMenu ? 'flex' : 'none';
+        updateBtnFocus();
+        if (hudAutoHideTimer) clearTimeout(hudAutoHideTimer);
+        if (autoHideMs > 0) {
+            hudAutoHideTimer = setTimeout(() => { if (!modalMode) hideOsd(); }, autoHideMs);
+        }
+    }
+
+    function hideOsd() {
+        const osd = document.getElementById('sb-kodi-osd');
+        if (osd) osd.classList.remove('sb-visible');
+        osdVisible = false;
+        window.__sbOsdVisible = false;
+        closeModal();
+    }
+
+    function openTrackModal(mode) {
+        ensureOsdDom();
+        const modal = document.getElementById('sb-osd-modal');
+        if (!modal) return;
+        modalMode = mode;
+        const tel = window.__sbLastTelemetry || {};
+        modalItems = (mode === 'subs' ? tel.subtitles : tel.audio_tracks) || [];
+        if (!modalItems.length) modalItems = [{ index: 0, label: 'Default Track', active: true }];
+        modalIdx = Math.max(0, modalItems.findIndex(x => x.active));
+        renderModal();
+        modal.classList.add('sb-visible');
+    }
+
+    function renderModal() {
+        const modal = document.getElementById('sb-osd-modal');
+        if (!modal) return;
+        const heading = modalMode === 'subs' ? 'Select Subtitles' : 'Select Audio Track';
+        let html = '<div class="sb-modal-title">' + heading + '</div>';
+        modalItems.forEach((item, i) => {
+            const cls = 'sb-modal-item' + (i === modalIdx ? ' sb-focused' : '');
+            const prefix = item.active ? '* ' : '';
+            html += '<div class="' + cls + '">' + prefix + item.label + '</div>';
+        });
+        modal.innerHTML = html;
+    }
+
+    function closeModal() {
+        const modal = document.getElementById('sb-osd-modal');
+        if (modal) modal.classList.remove('sb-visible');
+        modalMode = null;
+    }
+
+    function triggerAction(act) {
+        const v = document.querySelector('video');
+        const player = window.__getCadmiumPlayer ? window.__getCadmiumPlayer() : null;
+        const isPaused = (player && typeof player.isPaused === 'function') ? player.isPaused() : (v ? v.paused : false);
+        if (act === 'toggle_play') {
+            window.__streambridgeControl(isPaused ? 'resume' : 'pause', 0);
+        } else if (act === 'back10') {
+            window.__streambridgeControl('seek_by', -10);
+        } else if (act === 'fwd10') {
+            window.__streambridgeControl('seek_by', 10);
+        } else if (act === 'fwd30') {
+            window.__streambridgeControl('seek_by', 30);
+        } else if (act === 'subs') {
+            openTrackModal('subs');
+        } else if (act === 'audio') {
+            openTrackModal('audio');
+        } else if (act === 'restart') {
+            window.__streambridgeControl('seek', 0);
+            hideOsd();
+        } else if (act === 'stop') {
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage(JSON.stringify({ state: 'stopped', position_seconds: 0, duration_seconds: 0 }));
+            }
+        }
+    }
+
+    window.__sbSetOsdMode = function(mode) {
+        if (mode > 0) showOsd(true, 8000);
+        else hideOsd();
+    };
+    window.__sbHandleOsdKey = function(key) {
+        if (modalMode) {
+            if (key === 'ArrowDown') { modalIdx = (modalIdx + 1) % modalItems.length; renderModal(); }
+            else if (key === 'ArrowUp') { modalIdx = (modalIdx - 1 + modalItems.length) % modalItems.length; renderModal(); }
+            else if (key === 'Enter' || key === ' ') {
+                const chosen = modalItems[modalIdx];
+                if (chosen) window.__streambridgeControl(modalMode === 'subs' ? 'set_subtitle' : 'set_audio', chosen.index);
+                closeModal();
+            } else if (key === 'Escape' || key === 'Backspace' || key === 'm' || key === 'M') {
+                closeModal();
+            }
+            return true;
+        }
+        if (osdVisible) {
+            const btns = Array.from(document.querySelectorAll('#sb-osd-btn-row .sb-osd-btn'));
+            if (key === 'ArrowRight') { btnIdx = (btnIdx + 1) % btns.length; showOsd(true, 8000); }
+            else if (key === 'ArrowLeft') { btnIdx = (btnIdx - 1 + btns.length) % btns.length; showOsd(true, 8000); }
+            else if (key === 'Enter' || key === ' ') {
+                const act = btns[btnIdx] ? btns[btnIdx].getAttribute('data-act') : '';
+                if (act) triggerAction(act);
+                showOsd(true, 8000);
+            } else if (key === 'm' || key === 'M' || key === 'Escape' || key === 'Backspace' || key === 'i' || key === 'I') {
+                hideOsd();
+            }
+            return true;
+        }
+        if (key === 'm' || key === 'M' || key === 'i' || key === 'I' || key === 'Enter') { showOsd(true, 8000); return true; }
+        if (key === ' ' || key === 'p' || key === 'P' || key === 'k' || key === 'K') { triggerAction('toggle_play'); showOsd(false, 3000); return true; }
+        if (key === 'ArrowRight') { window.__streambridgeControl('seek_by', 10); showOsd(false, 3000); return true; }
+        if (key === 'ArrowLeft') { window.__streambridgeControl('seek_by', -10); showOsd(false, 3000); return true; }
+        if (key === 'ArrowUp') { window.__streambridgeControl('seek_by', 60); showOsd(false, 3000); return true; }
+        if (key === 'ArrowDown') { window.__streambridgeControl('seek_by', -60); showOsd(false, 3000); return true; }
+        if (key === 's' || key === 'S' || key === 'l' || key === 'L') { showOsd(true, 8000); openTrackModal('subs'); return true; }
+        if (key === 'a' || key === 'A') { showOsd(true, 8000); openTrackModal('audio'); return true; }
+        if (key === 'x' || key === 'X' || key === 'Escape' || key === 'Backspace' || key === 'BrowserBack' || key === 'MediaStop') { triggerAction('stop'); return true; }
+        return false;
+    };
+})();
+)JS";
+
+const wchar_t* kNetflixOsdKeyHandlerScript = LR"JS(
+(function() {
+    if (window.__sbOsdKeysInjected) return;
+    window.__sbOsdKeysInjected = true;
+
+    window.__sbUpdateOsdHud = function(tel) {
+        window.__sbLastTelemetry = tel;
+        const titleEl = document.getElementById('sb-osd-title');
+        if (titleEl && document.title && document.title !== 'Netflix') {
+            titleEl.textContent = document.title.replace(' - Netflix', '');
+        }
+        const clockEl = document.getElementById('sb-osd-clock');
+        const fillEl = document.getElementById('sb-osd-bar-fill');
+        const playBtn = document.getElementById('sb-btn-play');
+        const pos = Math.max(0, Math.floor(tel.position_seconds || 0));
+        const dur = Math.max(0, Math.floor(tel.duration_seconds || 0));
+        const fmt = function(sec) {
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            const mm = (h > 0 && m < 10) ? ('0' + m) : String(m);
+            const ss = s < 10 ? ('0' + s) : String(s);
+            return h > 0 ? (h + ':' + mm + ':' + ss) : (mm + ':' + ss);
+        };
+        if (clockEl) {
+            const rem = Math.max(0, dur - pos);
+            clockEl.textContent = fmt(pos) + ' / ' + fmt(dur) + '  (-' + fmt(rem) + ')';
+        }
+        if (fillEl && dur > 0) {
+            fillEl.style.width = Math.min(100, Math.max(0, (pos / dur) * 100)).toFixed(2) + '%';
+        }
+        if (playBtn) {
+            playBtn.textContent = tel.state === 'paused' ? 'Play' : 'Pause';
+        }
+    };
+
+    document.addEventListener('keydown', function(e) {
+        const key = e.key;
+        if (window.__sbHandleOsdKey && window.__sbHandleOsdKey(key)) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, true);
 })();
 )JS";
 
@@ -279,14 +514,19 @@ const wchar_t* kNetflixTelemetryAndOsdHideScript = LR"JS(
             else if (isPaused) state = 'paused';
             else state = 'playing';
         }
-        const msg = JSON.stringify({
+        const payloadObj = {
             state: state,
             position_seconds: posSec || 0.0,
             duration_seconds: durSec || 0.0,
             updated_at: Date.now() / 1000.0,
+            osd_visible: Boolean(window.__sbOsdVisible),
             subtitles: subtitles,
             audio_tracks: audioTracks
-        });
+        };
+        if (window.__sbUpdateOsdHud) {
+            try { window.__sbUpdateOsdHud(payloadObj); } catch (e) {}
+        }
+        const msg = JSON.stringify(payloadObj);
         window.chrome.webview.postMessage(msg);
     }
 
@@ -392,159 +632,6 @@ void DisableKodiChromaKeyCutout(HWND kodi_hwnd) {
     }
 }
 
-void CleanupOsdOverlayResources(WebViewHostContext* ctx) {
-    if (!ctx) return;
-    if (ctx->osd_hwnd && IsWindow(ctx->osd_hwnd)) {
-        DestroyWindow(ctx->osd_hwnd);
-    }
-    ctx->osd_hwnd = nullptr;
-    if (ctx->osd_mem_dc) {
-        if (ctx->osd_old_bmp) {
-            SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
-            ctx->osd_old_bmp = nullptr;
-        }
-        DeleteDC(ctx->osd_mem_dc);
-        ctx->osd_mem_dc = nullptr;
-    }
-    if (ctx->osd_dib) {
-        DeleteObject(ctx->osd_dib);
-        ctx->osd_dib = nullptr;
-    }
-    ctx->osd_pixels = nullptr;
-    ctx->osd_width = 0;
-    ctx->osd_height = 0;
-}
-
-void UpdateOsdLayeredWindow(WebViewHostContext* ctx) {
-    if (!ctx || !ctx->osd_hwnd || !ctx->kodi_hwnd || !IsWindow(ctx->kodi_hwnd)) return;
-
-    RECT kodi_rect = {};
-    if (!GetWindowRect(ctx->kodi_hwnd, &kodi_rect)) return;
-    int kw = kodi_rect.right - kodi_rect.left;
-    int kh = kodi_rect.bottom - kodi_rect.top;
-    if (kw <= 0 || kh <= 0) return;
-
-    if (!ctx->osd_dib || ctx->osd_width != kw || ctx->osd_height != kh) {
-        if (ctx->osd_mem_dc) {
-            if (ctx->osd_old_bmp) SelectObject(ctx->osd_mem_dc, ctx->osd_old_bmp);
-            DeleteDC(ctx->osd_mem_dc);
-            ctx->osd_mem_dc = nullptr;
-        }
-        if (ctx->osd_dib) {
-            DeleteObject(ctx->osd_dib);
-            ctx->osd_dib = nullptr;
-        }
-        HDC screen_dc = GetDC(nullptr);
-        ctx->osd_mem_dc = CreateCompatibleDC(screen_dc);
-        BITMAPINFO bmi = {};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = kw;
-        bmi.bmiHeader.biHeight = -kh;  // top-down DIB
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-        void* bits = nullptr;
-        ctx->osd_dib = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-        ReleaseDC(nullptr, screen_dc);
-        if (!ctx->osd_dib || !bits) return;
-        ctx->osd_old_bmp = SelectObject(ctx->osd_mem_dc, ctx->osd_dib);
-        ctx->osd_pixels = static_cast<uint32_t*>(bits);
-        ctx->osd_width = kw;
-        ctx->osd_height = kh;
-    }
-
-    // Capture Kodi's D3D11 UI surface (including any skin OSD) without touching StreamBridge.Player
-    if (!PrintWindow(ctx->kodi_hwnd, ctx->osd_mem_dc, 0x00000002 /* PW_RENDERFULLCONTENT */)) {
-        return;
-    }
-
-    // Sample reference background key color from upper-left/right video canvas (away from OSD bars & center popups)
-    uint32_t* px = ctx->osd_pixels;
-    int sample_y = kh / 5;
-    uint32_t p1 = px[sample_y * kw + (kw / 8)];
-    uint32_t p2 = px[sample_y * kw + (kw - kw / 8)];
-    uint32_t ref_px = ((p1 >> 8) & 0xFF) >= ((p2 >> 8) & 0xFF) ? p1 : p2;
-    int kr = static_cast<int>((ref_px >> 16) & 0xFF);
-    int kg = static_cast<int>((ref_px >> 8) & 0xFF);
-    int kb = static_cast<int>(ref_px & 0xFF);
-    int k_dg_r = std::max(8, kg - kr);
-
-    int total = kw * kh;
-    for (int i = 0; i < total; ++i) {
-        uint32_t c = px[i];
-        int b = static_cast<int>(c & 0xFF);
-        int g = static_cast<int>((c >> 8) & 0xFF);
-        int r = static_cast<int>((c >> 16) & 0xFF);
-        int max_rgb = std::max(r, std::max(g, b));
-
-        // 1. Exact match to empty proxy video background OR pure near-black background -> 100% transparent (Alpha = 0)
-        if (max_rgb <= 5 || (std::abs(r - kr) <= 7 && std::abs(g - kg) <= 7 && std::abs(b - kb) <= 7)) {
-            px[i] = 0x00000000;
-            continue;
-        }
-
-        // 2a. When chroma-key background (kg >= 16) is present: unmix semi-transparent dark OSD panels & shadows
-        if (kg >= 16) {
-            int dg_r = g - r;
-            int dg_b = g - b;
-            int db_r = b - r;
-            if (dg_r > 1 && db_r >= -3 && dg_b >= -3 && std::abs(dg_b - db_r) <= 8 && g <= (kg + 16)) {
-                int bg_frac_256 = std::min(256, std::max(0, (dg_r * 256) / k_dg_r));
-                int alpha = 255 - ((bg_frac_256 * 255) >> 8);
-                if (alpha <= 10) {
-                    px[i] = 0x00000000;
-                } else {
-                    int r_clean = std::min(alpha, std::max(0, r - ((kr * bg_frac_256) >> 8)));
-                    int g_clean = std::min(alpha, std::max(0, g - ((kg * bg_frac_256) >> 8)));
-                    int b_clean = std::min(alpha, std::max(0, b - ((kb * bg_frac_256) >> 8)));
-                    px[i] = (static_cast<uint32_t>(alpha) << 24) |
-                            (static_cast<uint32_t>(r_clean) << 16) |
-                            (static_cast<uint32_t>(g_clean) << 8) |
-                            static_cast<uint32_t>(b_clean);
-                }
-                continue;
-            }
-        } else if (max_rgb <= 64) {
-            // 2b. When PrintWindow captured Kodi's GUI layer over a black (0,0,0) clear target:
-            //     give dark gray OSD panel backgrounds smooth translucent premultiplied alpha
-            int alpha = std::min(255, 110 + max_rgb * 2);
-            int r_pre = std::min(alpha, (r * alpha) / 255);
-            int g_pre = std::min(alpha, (g * alpha) / 255);
-            int b_pre = std::min(alpha, (b * alpha) / 255);
-            px[i] = (static_cast<uint32_t>(alpha) << 24) |
-                    (static_cast<uint32_t>(r_pre) << 16) |
-                    (static_cast<uint32_t>(g_pre) << 8) |
-                    static_cast<uint32_t>(b_pre);
-            continue;
-        }
-
-        // 3. Opaque skin OSD text, icons, progress bar, or artwork -> 100% opaque (Alpha = 255)
-        px[i] = 0xFF000000 | (c & 0x00FFFFFF);
-    }
-
-    POINT pt_dst = {kodi_rect.left, kodi_rect.top};
-    SIZE sz_win = {kw, kh};
-    POINT pt_src = {0, 0};
-    BLENDFUNCTION blend = {};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.BlendFlags = 0;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    HDC screen_dc = GetDC(nullptr);
-    UpdateLayeredWindow(
-        ctx->osd_hwnd,
-        screen_dc,
-        &pt_dst,
-        &sz_win,
-        ctx->osd_mem_dc,
-        &pt_src,
-        0,
-        &blend,
-        ULW_ALPHA);
-    ReleaseDC(nullptr, screen_dc);
-}
-
 bool IsPostLoginUrl(const std::wstring& uri) {
     if (uri.find(L"netflix.com/browse") != std::wstring::npos ||
         uri.find(L"netflix.com/SwitchProfile") != std::wstring::npos ||
@@ -608,13 +695,6 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     return 0;
                 }
-                if (GetForegroundWindow() == hwnd) {
-                    SetForegroundWindow(ctx->kodi_hwnd);
-                }
-            } else if (wparam == 2 && ctx && !ctx->is_login_session) {
-                if (ctx->osd_mode > 0) {
-                    UpdateOsdLayeredWindow(ctx);
-                }
             }
             return 0;
         case WM_APP + 1:
@@ -640,27 +720,11 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             }
             return 0;
         case WM_APP + 4:
-            if (ctx && !ctx->is_login_session) {
-                SetWindowRgn(hwnd, nullptr, TRUE);
-                ctx->osd_mode = static_cast<int>(wparam);
-                if (ctx->osd_mode > 0 && ctx->osd_hwnd) {
-                    UpdateOsdLayeredWindow(ctx);
-                    ShowWindow(ctx->osd_hwnd, SW_SHOWNOACTIVATE);
-                    SetWindowPos(
-                        ctx->osd_hwnd,
-                        HWND_TOP,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                    SetTimer(hwnd, 2, 33, nullptr);
-                } else {
-                    KillTimer(hwnd, 2);
-                    if (ctx->osd_hwnd) {
-                        ShowWindow(ctx->osd_hwnd, SW_HIDE);
-                    }
-                }
+            if (ctx && ctx->webview) {
+                int mode_val = static_cast<int>(wparam);
+                std::wstring js = L"if(window.__streambridgeControl) window.__streambridgeControl('osd_mode', " +
+                                  std::to_wstring(mode_val) + L");";
+                ctx->webview->ExecuteScript(js.c_str(), nullptr);
             }
             return 0;
         case WM_APP + 5:
@@ -695,8 +759,6 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             break;
         case WM_CLOSE:
             KillTimer(hwnd, 1);
-            KillTimer(hwnd, 2);
-            CleanupOsdOverlayResources(ctx);
             if (ctx && !ctx->is_login_session) {
                 WriteLiveTelemetryJson("{\"state\":\"stopped\",\"position_seconds\":0.0,\"duration_seconds\":0.0}");
             }
@@ -815,8 +877,8 @@ bool RunInteractiveWebView2Window(
             win_style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             parent_hwnd = ctx.kodi_hwnd;
         } else {
-            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd with WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED
-            // so mouse clicks pass 100% through to Kodi and Kodi keeps keyboard focus ('M' OSD).
+            // Playback Mode: Create chromeless WS_POPUP owned by kodi_hwnd with direct keyboard focus
+            // so the In-WebView2 Translucent Frosted-Glass Kodi OSD ('M' menu) responds instantaneously.
             RECT kodi_screen = {};
             GetWindowRect(ctx.kodi_hwnd, &kodi_screen);
             pos_x = kodi_screen.left;
@@ -824,7 +886,7 @@ bool RunInteractiveWebView2Window(
             win_w = kodi_screen.right - kodi_screen.left;
             win_h = kodi_screen.bottom - kodi_screen.top;
             win_style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN;
-            ex_style = WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT;
+            ex_style = 0;
             parent_hwnd = ctx.kodi_hwnd;
         }
     }
@@ -850,42 +912,13 @@ bool RunInteractiveWebView2Window(
     }
     ctx.main_hwnd = hwnd;
 
+    ShowCursor(TRUE);
+    ShowWindow(hwnd, SW_SHOW);
+    SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_SHOWWINDOW);
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
     if (!is_login_session && ctx.kodi_hwnd) {
-        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
-        // Create companion per-pixel alpha OSD overlay window owned by hwnd
-        const wchar_t* kOsdClassName = L"StreamBridgeOsdOverlayClass";
-        WNDCLASSEXW osd_wc = {};
-        osd_wc.cbSize = sizeof(WNDCLASSEXW);
-        osd_wc.lpfnWndProc = DefWindowProcW;
-        osd_wc.hInstance = hinst;
-        osd_wc.lpszClassName = kOsdClassName;
-        RegisterClassExW(&osd_wc);
-
-        ctx.osd_hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-            kOsdClassName,
-            L"StreamBridge OSD Overlay",
-            WS_POPUP,
-            pos_x,
-            pos_y,
-            win_w,
-            win_h,
-            hwnd,
-            nullptr,
-            hinst,
-            nullptr);
-
-        // Keep owned popup in front of kodi_hwnd without stealing keyboard or mouse focus from Kodi
-        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        SetForegroundWindow(ctx.kodi_hwnd);
-        SetTimer(hwnd, 1, 150, nullptr);
-    } else {
-        ShowCursor(TRUE);
-        ShowWindow(hwnd, SW_SHOW);
-        SetWindowPos(hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_SHOWWINDOW);
-        SetForegroundWindow(hwnd);
-        SetFocus(hwnd);
+        SetTimer(hwnd, 1, 500, nullptr);
     }
 
     std::wstring profile_dir = EnsureIsolatedBrowserProfileDir();
@@ -924,11 +957,9 @@ bool RunInteractiveWebView2Window(
 
                             ResizeWebViewBounds(&ctx);
                             controller->put_IsVisible(TRUE);
-                            if (ctx.is_login_session) {
-                                controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-                            }
+                            controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 
-                            // Intercept ESC, Browser Back, Media Stop (and Backspace in playback mode)
+                            // Intercept Media Stop (and ESC in login mode); in playback mode, ESC/Backspace close the OSD first
                             EventRegistrationToken accel_token = {};
                             controller->add_AcceleratorKeyPressed(
                                 Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
@@ -940,9 +971,8 @@ bool RunInteractiveWebView2Window(
                                         args->get_KeyEventKind(&kind);
                                         args->get_VirtualKey(&key);
                                         if (kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN &&
-                                            (key == VK_ESCAPE || key == VK_BROWSER_BACK ||
-                                             key == VK_MEDIA_STOP ||
-                                             (!ctx.is_login_session && key == VK_BACK))) {
+                                            (key == VK_MEDIA_STOP ||
+                                             (ctx.is_login_session && (key == VK_ESCAPE || key == VK_BROWSER_BACK)))) {
                                             args->put_Handled(TRUE);
                                             PostMessageW(ctx.main_hwnd, WM_CLOSE, 0, 0);
                                         }
@@ -987,6 +1017,12 @@ bool RunInteractiveWebView2Window(
                                 }
                                 ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                     kNetflixCadmiumControlScript, nullptr);
+                                ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                    kNetflixOsdCssScript, nullptr);
+                                ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                    kNetflixOsdUiScript, nullptr);
+                                ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                    kNetflixOsdKeyHandlerScript, nullptr);
                                 ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                     kNetflixTelemetryAndOsdHideScript, nullptr);
 
@@ -1411,6 +1447,12 @@ bool RunCadmiumFixtureTestWindow(
                             ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                 kNetflixCadmiumControlScript, nullptr);
                             ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdCssScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdUiScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdKeyHandlerScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                 kNetflixTelemetryAndOsdHideScript, nullptr);
 
                             EventRegistrationToken msg_token = {};
@@ -1588,6 +1630,12 @@ bool ProbeNetflixCadmiumContractToJson(
                             }
                             ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                 kNetflixCadmiumControlScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdCssScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdUiScript, nullptr);
+                            ctx.webview->AddScriptToExecuteOnDocumentCreated(
+                                kNetflixOsdKeyHandlerScript, nullptr);
                             ctx.webview->AddScriptToExecuteOnDocumentCreated(
                                 kNetflixTelemetryAndOsdHideScript, nullptr);
 

@@ -406,17 +406,21 @@ def test_cadmium_webview2_win32_controls_and_postplay_regression(tmp_path: Path)
         # Switch subtitle track to index 2 ('Spanish') via WM_APP + 6 and audio track to index 1 ('Japanese') via WM_APP + 7
         assert send_player_control("set_subtitle", 2) is True
         assert send_player_control("set_audio", 1) is True
+        assert send_player_control("osd_mode", 1) is True
         for _ in range(15):
             time.sleep(0.2)
             tel = read_live_telemetry()
             subs = (tel or {}).get("subtitles")
-            if isinstance(subs, list) and len(subs) == 3 and subs[2].get("active") is True:
+            if isinstance(subs, list) and len(subs) == 3 and subs[2].get("active") is True and (tel or {}).get("osd_visible") is True:
                 break
         assert tel is not None
+        assert tel.get("osd_visible") is True
         subs_list = tel.get("subtitles")
         auds_list = tel.get("audio_tracks")
         assert isinstance(subs_list, list) and subs_list[2]["active"] is True
         assert isinstance(auds_list, list) and auds_list[1]["active"] is True
+
+        assert send_player_control("osd_mode", 0) is True
 
         # Pause (WM_APP + 1)
         assert send_player_control("pause") is True
