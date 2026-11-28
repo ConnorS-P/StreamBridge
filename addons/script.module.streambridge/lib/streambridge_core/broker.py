@@ -136,8 +136,7 @@ class PlaybackBroker:
                 target_dur = (content_dur + 30) if not wait_for_exit else 120
                 proxy_avi = generate_chroma_key_avi(proxy_path, duration_seconds=target_dur)
                 self.kodi.window_properties["streambridge.osd_proxy_path"] = str(proxy_avi)
-                overlay_dll = env.companion_exe_path.parent / "StreamBridge.Overlay.dll"
-                enable_kodi_osd_cutout(overlay_dll_path=overlay_dll)
+                enable_kodi_osd_cutout()
                 no_win_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if env.is_windows else 0
                 cmd = [str(env.companion_exe_path), "--watch", descriptor.launch_url]
                 if start_from_beginning:
@@ -152,7 +151,7 @@ class PlaybackBroker:
                     try:
                         proc.wait()
                     finally:
-                        disable_kodi_osd_cutout(overlay_dll_path=overlay_dll)
+                        disable_kodi_osd_cutout()
                 events = make_unverified_browser_events(descriptor, backend_name="webview2_native_host")
                 return PlaybackSessionResult(
                     session_id=descriptor.session_id,
